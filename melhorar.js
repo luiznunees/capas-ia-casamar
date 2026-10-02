@@ -45,7 +45,7 @@ const fs = require('fs');
 const path = require('path');
 const sharp = require('sharp');
 const { chromium } = require('playwright');
-const { ENTRADA, SAIDA, argsChrome, resolver, alvosOuEntrada, imoveisDoSite, imoveisDoCondominio } = require('./fotos');
+const { ENTRADA, SAIDA, argsChrome, lerConfig, condominiosDoSite, resolver, alvosOuEntrada, imoveisDoSite, imoveisDoCondominio } = require('./fotos');
 
 // ---------- argumentos ----------
 const args = process.argv.slice(2);
@@ -73,7 +73,6 @@ const TIMEOUT_IMG = 6 * 60 * 1000;
 const PASTA_ORIG = path.join(SAIDA, '_originais');
 const ARQ_ESTADO = path.join(SAIDA, 'estado.json');
 const ARQ_TRAVA = path.join(SAIDA, '.rodando');
-const ARQ_PRIORIDADES = path.join(__dirname, 'prioridades.txt');
 const MAX_TENTATIVAS = 3;   // depois disso a foto só volta se a capa mudar ou com --forcar
 
 // Card: 4:5, nunca mais largo que 1080.
@@ -362,24 +361,25 @@ function lerJson(arq, padrao) {
   try { return JSON.parse(fs.readFileSync(arq, 'utf8')); } catch { return padrao; }
 }
 
-function lerPrioridades() {
-  if (!fs.existsSync(ARQ_PRIORIDADES)) return [];
-  return fs.readFileSync(ARQ_PRIORIDADES, 'utf8').split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#'));
-}
-
-// Condomínios prioritários na ordem do arquivo, depois o resto do sitemap, sem repetir.
+// Condomínios prioritários (lista editada no painel; padrão prioridades.txt), depois o resto do sitemap.
+// Grava saida/fila.json com quem é de qual condomínio, para a visão geral do painel.
 async function filaDoSite() {
   const fila = [];
   const vistos = new Set();
   const adicionar = (u) => { if (!vistos.has(u)) { vistos.add(u); fila.push(u); } };
-  for (const slug of lerPrioridades()) {
-    const urls = await imoveisDoCondominio(slug).catch(e => { console.log(`   (aviso: condomínio ${slug}: ${e.message})`); return []; });
+  const codigoDe = (u) => (u.match(/\/imovel\/(\d+)\//) || [])[1];
+  const cidades = new Map((await condominiosDoSite().catch(() => [])).map(c => [c.slug, c.cidade]));
+  const porCondominio = {};
+  for (const slug of lerConfig().prioridades) {
+    const urls = await imoveisDoCondominio(slug, cidades.get(slug)).catch(e => { console.log(`   (aviso: condomínio ${slug}: ${e.message})`); return []; });
     console.log(`   prioridade ${slug}: ${urls.length} imóveis`);
+    porCondominio[slug] = urls.map(codigoDe);
     urls.forEach(adicionar);
   }
   const prioritarios = fila.length;
   (await imoveisDoSite()).forEach(adicionar);
   console.log(`   ${prioritarios} prioritários + ${fila.length - prioritarios} restantes do site`);
+  fs.writeFileSync(path.join(SAIDA, 'fila.json'), JSON.stringify({ em: new Date().toISOString(), total: fila.length, prioritarios, porCondominio }));
   return fila;
 }
 

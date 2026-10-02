@@ -20,7 +20,31 @@ const fs = require('fs');
 const path = require('path');
 const http = require('http');
 const { spawn } = require('child_process');
-const { DADOS, SAIDA, sessao, resolver, urlDoImovel } = require('./fotos');
+const { DADOS, SAIDA, sessao, lerConfig, salvarConfig, condominiosDoSite, resolver, urlDoImovel } = require('./fotos');
+const { resumo } = require('./resumo');
+const { enviarTexto, configurado } = require('./alertas');
+
+// ---------- configuração (aba Controles / Alertas) ----------
+const MASCARA = '••••••••';
+let cacheCondominios = null;
+function configPublica() {
+  const c = lerConfig();
+  return { ...c, alertas: { ...c.alertas, apikey: c.alertas.apikey ? MASCARA : '' } };
+}
+function validarConfig(c) {
+  const hora = (h) => Number.isInteger(h) && h >= 0 && h <= 23;
+  if ('janelaInicio' in c && !hora(c.janelaInicio)) return 'Hora de início inválida (0 a 23).';
+  if ('janelaFim' in c && !hora(c.janelaFim)) return 'Hora de fim inválida (0 a 23).';
+  if ('paralelo' in c && !(Number.isInteger(c.paralelo) && c.paralelo >= 1 && c.paralelo <= 5)) return 'Abas: de 1 a 5.';
+  if ('prioridades' in c && !(Array.isArray(c.prioridades) && c.prioridades.every(s => /^[a-z0-9-]+$/.test(s)))) return 'Lista de prioridades inválida.';
+  for (const k of ['iaAutomatica', 'publicarAutomatico']) if (k in c && typeof c[k] !== 'boolean') return `${k} inválido.`;
+  if (c.alertas) {
+    const a = c.alertas;
+    if (a.url && !/^https?:\/\//.test(a.url)) return 'URL da Evolution deve começar com http:// ou https://';
+    if (a.numero && String(a.numero).replace(/\D/g, '').length < 10) return 'Número do WhatsApp com DDI e DDD, ex.: 5551999999999';
+  }
+  return null;
+}
 
 const PORTA = +(process.env.PAINEL_PORTA || 3020);
 const HOST = process.env.PAINEL_HOST || '127.0.0.1';
@@ -217,6 +241,55 @@ const servidor = http.createServer(async (req, res) => {
       return fs.createReadStream(arq).pipe(res);
     }
     if (req.method === 'GET' && url.pathname === '/api/recentes') return responder(res, 200, recentes());
+
+    // ---------- admin: visão geral, controles, alertas ----------
+    if (req.method === 'GET' && url.pathname === '/api/resumo') {
+      return responder(res, 200, {
+        ...resumo(),
+        rodada: global.agendador ? global.agendador.situacao() : null,
+        sessao: { ...sessao.datas(), pendente: sessao.pendente() },
+        alertasConfigurados: configurado(),
+      });
+    }
+    if (url.pathname === '/api/config') {
+      if (req.method === 'GET') return responder(res, 200, configPublica());
+      if (req.method === 'POST') {
+        const novo = JSON.parse(await lerCorpo(req, 100 * 1024));
+        const erro = validarConfig(novo);
+        if (erro) return responder(res, 400, { erro });
+        // chave mascarada (ou qualquer coisa que não seja texto simples) = não mexeu na chave
+        if (novo.alertas && 'apikey' in novo.alertas && !/^[\x21-\x7e]*$/.test(novo.alertas.apikey)) delete novo.alertas.apikey;
+        salvarConfig(novo);
+        return responder(res, 200, configPublica());
+      }
+    }
+    if (req.method === 'GET' && url.pathname === '/api/condominios') {
+      if (!cacheCondominios || Date.now() - cacheCondominios.em > 24 * 3600 * 1000) {
+        cacheCondominios = { em: Date.now(), lista: await condominiosDoSite() };
+      }
+      return responder(res, 200, cacheCondominios.lista);
+    }
+    if (url.pathname === '/api/fila/urgente') {
+      if (req.method === 'GET') return responder(res, 200, lerLista(ARQ_URGENTE));
+      if (req.method === 'POST') {
+        const { codigos = [] } = JSON.parse(await lerCorpo(req, 100 * 1024));
+        const validos = [...new Set(codigos.map(String).map(c => c.trim()).filter(c => /^\d{1,9}$/.test(c)))].slice(0, 200);
+        const achados = [], naoAchados = [];
+        for (const c of validos) {
+          const site = await dadosDoSite(c).catch(() => ({}));
+          (site.url ? achados : naoAchados).push(site.url ? site.url : c);
+        }
+        if (achados.length) fs.appendFileSync(ARQ_URGENTE, achados.map(u => u + '\n').join(''));
+        return responder(res, 200, { adicionados: achados.length, naoAchados, fila: lerLista(ARQ_URGENTE) });
+      }
+      if (req.method === 'DELETE') { fs.writeFileSync(ARQ_URGENTE, ''); return responder(res, 200, []); }
+    }
+    if (req.method === 'POST' && url.pathname === '/api/alertas/teste') {
+      try {
+        await enviarTexto('🏠 Capas IA · Casa Mar\n\nTeste de alerta: se você recebeu isto, os avisos do painel estão funcionando.');
+        return responder(res, 200, { ok: true, mensagem: 'Mensagem de teste enviada.' });
+      } catch (e) { return responder(res, 400, { erro: e.message }); }
+    }
 
     // Rodadas automáticas (só quando o painel roda dentro do agendador.js)
     if (partes[0] === 'api' && partes[1] === 'rodada') {

@@ -99,6 +99,63 @@ function argsChrome() {
   return a;
 }
 
+// Condomínios do site (filtro da busca da home): [{ slug, nome, cidade }].
+async function condominiosDoSite() {
+  const html = await (await baixar('https://www.casamarimoveis.net/')).text();
+  const lista = [];
+  const visto = new Set();
+  for (const m of html.matchAll(/name="condominios\[\]" id="condominios([^"]+)" value="([^"]+)"[^>]*>\s*<label[^>]*>([^<]+)/g)) {
+    const [, id, slug, nome] = m;
+    if (visto.has(slug)) continue;
+    visto.add(slug);
+    // id = condominios<cidade><número><slug>
+    lista.push({ slug, nome: nome.trim(), cidade: (id.match(/^(.*?)\d+/) || [, 'xangri-la'])[1] });
+  }
+  return lista;
+}
+
+// ---------- configuração editável pelo painel (DADOS/config.json) ----------
+// Variáveis de ambiente são o padrão; o que for salvo pelo painel vale por cima delas.
+const ARQ_CONFIG = path.join(DADOS, 'config.json');
+function padroesConfig() {
+  const arqPrio = path.join(__dirname, 'prioridades.txt');
+  const prioridades = fs.existsSync(arqPrio)
+    ? fs.readFileSync(arqPrio, 'utf8').split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#'))
+    : [];
+  return {
+    iaAutomatica: process.env.IA_AUTOMATICA !== 'nao',
+    publicarAutomatico: process.env.PUBLICAR_AUTOMATICO !== 'nao',
+    janelaInicio: +(process.env.JANELA_INICIO ?? 0),
+    janelaFim: +(process.env.JANELA_FIM ?? 6),
+    paralelo: +(process.env.PARALELO || 3),
+    prioridades,
+    alertas: {
+      url: process.env.EVOLUTION_URL || '',
+      instancia: process.env.EVOLUTION_INSTANCIA || '',
+      apikey: process.env.EVOLUTION_APIKEY || '',
+      numero: process.env.WHATSAPP_NUMERO || '',
+      resumo: true,
+      falhas: true,
+    },
+  };
+}
+function lerConfig() {
+  const p = padroesConfig();
+  let salvo = {};
+  try { salvo = JSON.parse(fs.readFileSync(ARQ_CONFIG, 'utf8')); } catch {}
+  return { ...p, ...salvo, alertas: { ...p.alertas, ...(salvo.alertas || {}) } };
+}
+function salvarConfig(parcial) {
+  let salvo = {};
+  try { salvo = JSON.parse(fs.readFileSync(ARQ_CONFIG, 'utf8')); } catch {}
+  const novo = { ...salvo, ...parcial };
+  if (parcial.alertas) novo.alertas = { ...(salvo.alertas || {}), ...parcial.alertas };
+  fs.mkdirSync(DADOS, { recursive: true });
+  fs.writeFileSync(ARQ_CONFIG + '.tmp', JSON.stringify(novo, null, 1));
+  fs.renameSync(ARQ_CONFIG + '.tmp', ARQ_CONFIG);
+  return lerConfig();
+}
+
 // Sessão do ChatGPT exportada no Windows (melhorar.js --exportar-sessao), enviada pelo painel.
 // "Pendente" = arquivo mais novo que a última importação; o agendador importa antes da próxima rodada.
 const ARQ_SESSAO = path.join(DADOS, 'sessao-chatgpt.json');
@@ -111,4 +168,4 @@ const sessao = {
   datas: () => ({ enviada: mtime(ARQ_SESSAO) || null, importada: mtime(MARCA_SESSAO) || null }),
 };
 
-module.exports = { DADOS, ENTRADA, SAIDA, argsChrome, sessao, baixar, resolver, carregar, alvosOuEntrada, imoveisDoSite, imoveisDoCondominio, urlDoImovel };
+module.exports = { DADOS, ENTRADA, SAIDA, argsChrome, sessao, lerConfig, salvarConfig, condominiosDoSite, baixar, resolver, carregar, alvosOuEntrada, imoveisDoSite, imoveisDoCondominio, urlDoImovel };

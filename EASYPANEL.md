@@ -14,7 +14,7 @@ SITE_LOGIN=...           # admin do site (Atualizar Imóvel por Código)
 SITE_SENHA=...
 PAINEL_SENHA=...         # senha do painel web (o usuário pode ser qualquer um)
 ```
-Opcionais: `JANELA_INICIO=0` e `JANELA_FIM=6` (horário das rodadas automáticas; padrão 00h–06h), `IA_AUTOMATICA=nao`, `PUBLICAR_AUTOMATICO=nao`, `INTERVALO_PUBLICAR_MIN=15`.
+Horário, IA/publicação automáticas, abas, prioridades e alertas no WhatsApp se ajustam no próprio painel (abas Controles e Alertas); as variáveis `JANELA_INICIO`, `JANELA_FIM`, `IA_AUTOMATICA=nao`, `PUBLICAR_AUTOMATICO=nao`, `PARALELO` e `EVOLUTION_*` só valem enquanto nada for salvo lá.
 
 ## 3. Mounts
 **Volume**, nome `dados`, mount path `/dados`.
