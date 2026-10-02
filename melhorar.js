@@ -440,7 +440,8 @@ function pegarUrgente() {
     await garantirLogin(page);
     if (EXPORTAR) {
       await ctx.storageState({ path: EXPORTAR });
-      console.log(`Sessão salva em ${EXPORTAR}. Copie para a VPS e rode lá com --importar-sessao=${path.basename(EXPORTAR)}`);
+      console.log(`Sessão salva em ${EXPORTAR}.`);
+      console.log('Envie este arquivo no painel (Easypanel): "Login do ChatGPT" > "Enviar sessao-chatgpt.json". Não compartilhe: ele dá acesso à sua conta.');
       return;
     }
     if (IMPORTAR || SO_LOGIN) { console.log('Login pronto.'); return; }
