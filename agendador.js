@@ -33,12 +33,21 @@ function rodar(nome, args) {
     const log = fs.createWriteStream(path.join(LOGS, `${nome}-${hoje()}.log`), { flags: 'a' });
     log.write(`\n===== ${agora()} node ${args.join(' ')}\n`);
     const p = spawn(process.execPath, args, { cwd: __dirname, env: process.env });
+    // últimas linhas ficam guardadas para mostrar o motivo no log do Easypanel quando falha
+    const ultimas = [];
+    const guardar = (d) => {
+      for (const l of String(d).split(/\r?\n/)) if (l.trim()) ultimas.push(l);
+      if (ultimas.length > 6) ultimas.splice(0, ultimas.length - 6);
+    };
+    p.stdout.on('data', guardar);
+    p.stderr.on('data', guardar);
     p.stdout.pipe(log, { end: false });
     p.stderr.pipe(log, { end: false });
     p.on('error', (e) => { log.end(`erro ao iniciar: ${e.message}\n`); ok(1); });
     p.on('close', (cod) => {
       log.end(`===== fim (código ${cod})\n`);
       console.log(`[${agora()}] ${nome}: ${args.slice(1).join(' ')} -> ${cod === 0 ? 'ok' : 'código ' + cod}`);
+      if (cod !== 0) for (const l of ultimas) console.log(`    ${l}`);
       ok(cod);
     });
   });

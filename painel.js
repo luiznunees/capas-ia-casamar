@@ -218,6 +218,13 @@ const servidor = http.createServer(async (req, res) => {
     }
     if (req.method === 'GET' && url.pathname === '/api/recentes') return responder(res, 200, recentes());
 
+    // Últimas linhas do log de hoje das rodadas automáticas (agendador.js): /api/logs/ia ou /api/logs/publicar
+    if (req.method === 'GET' && partes[0] === 'api' && partes[1] === 'logs' && ['ia', 'publicar'].includes(partes[2])) {
+      const arq = path.join(DADOS, 'logs', `${partes[2]}-${new Date().toLocaleDateString('sv-SE')}.log`);
+      const linhas = fs.existsSync(arq) ? fs.readFileSync(arq, 'utf8').split(/\r?\n/).slice(-200) : [];
+      return responder(res, 200, { arquivo: path.basename(arq), linhas });
+    }
+
     // Sessão do ChatGPT: GET = situação; POST = arquivo sessao-chatgpt.json exportado no Windows
     if (url.pathname === '/api/sessao') {
       if (req.method === 'GET') return responder(res, 200, { ...sessao.datas(), pendente: sessao.pendente(), rodadaIA: travaViva(path.join(SAIDA, '.rodando')) });
