@@ -1,0 +1,2 @@
+# Códigos de imóvel que NÃO devem ser publicados no Jetimob (um por linha).
+# Ex.: a IA inventou algo ou ficou ruim no *_comparar.jpg.

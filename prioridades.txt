@@ -1,0 +1,14 @@
+# Condomínios processados primeiro, nesta ordem (no modo --site).
+# Um por linha, com o nome como aparece na URL do site:
+#   casamarimoveis.net/busca/condominios/<nome>/1/
+# Depois deles, o script segue com o resto dos imóveis do site.
+zen-concept
+amare
+sunset
+blue
+enseada-lagos
+malibu-beach
+sea-coast
+quintas-do-lago
+riviera
+las-palmas

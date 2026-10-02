@@ -1,0 +1,12 @@
+node_modules
+saida
+entrada
+logs
+perfil-*
+.env
+sessao-chatgpt.json
+sessao-chatgpt.importada
+debug-*.png
+*.log
+.git
+instalar-vps.sh
