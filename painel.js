@@ -19,6 +19,7 @@
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
+const crypto = require('crypto');
 const { spawn } = require('child_process');
 const { DADOS, SAIDA, sessao, lerConfig, salvarConfig, condominiosDoSite, resolver, urlDoImovel } = require('./fotos');
 const { resumo } = require('./resumo');
@@ -224,19 +225,92 @@ function responder(res, cod, corpo, tipo = 'application/json; charset=utf-8') {
   res.end(typeof corpo === 'string' || Buffer.isBuffer(corpo) ? corpo : JSON.stringify(corpo));
 }
 
+// ---------- login ----------
+// Cookie assinado (validade + HMAC com a senha): sobrevive a reinícios e deploys, e cai sozinho se
+// a senha mudar. Basic auth continua valendo para chamadas de API (scripts, curl).
+const USUARIO = process.env.PAINEL_USUARIO || 'admin';
+const DIAS_LOGADO = 30;
+const COOKIE = 'capas_sessao';
+const assinar = (texto) => crypto.createHmac('sha256', `capas-ia:${SENHA}`).update(texto).digest('base64url');
+const iguais = (a, b) => {
+  const x = Buffer.from(String(a)), y = Buffer.from(String(b));
+  return x.length === y.length && crypto.timingSafeEqual(x, y);
+};
+
+function sessaoValida(req) {
+  const m = (req.headers.cookie || '').match(new RegExp(`(?:^|;\\s*)${COOKIE}=([^;]+)`));
+  if (!m) return false;
+  const [validade, assinatura] = decodeURIComponent(m[1]).split('.');
+  return +validade > Date.now() && iguais(assinatura || '', assinar(`${USUARIO}|${validade}`));
+}
+
 function autorizado(req) {
   if (!SENHA) return true;
+  if (sessaoValida(req)) return true;
   const [tipo, valor] = (req.headers.authorization || '').split(' ');
   if (tipo !== 'Basic' || !valor) return false;
-  return Buffer.from(valor, 'base64').toString().split(':').slice(1).join(':') === SENHA;
+  return iguais(Buffer.from(valor, 'base64').toString().split(':').slice(1).join(':'), SENHA);
+}
+
+function cookieSessao(req, valor, maxAge) {
+  const https = (req.headers['x-forwarded-proto'] || '').includes('https');
+  return `${COOKIE}=${encodeURIComponent(valor)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${https ? '; Secure' : ''}`;
+}
+
+// Senha errada demais: 8 tentativas por IP a cada 15 min.
+const tentativas = new Map();   // ip -> { n, desde }
+const ipDe = (req) => (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+function bloqueado(ip) {
+  const t = tentativas.get(ip);
+  if (!t || Date.now() - t.desde > 15 * 60 * 1000) { tentativas.delete(ip); return false; }
+  return t.n >= 8;
+}
+function errou(ip) {
+  const t = tentativas.get(ip);
+  if (!t || Date.now() - t.desde > 15 * 60 * 1000) tentativas.set(ip, { n: 1, desde: Date.now() });
+  else t.n++;
+}
+
+async function rotasDeLogin(req, res, url) {
+  if (req.method === 'GET' && url.pathname === '/login') {
+    if (!SENHA || sessaoValida(req)) { res.writeHead(302, { Location: '/' }); res.end(); return true; }
+    responder(res, 200, fs.readFileSync(path.join(__dirname, 'login.html')), 'text/html; charset=utf-8');
+    return true;
+  }
+  if (req.method === 'POST' && url.pathname === '/api/login') {
+    const ip = ipDe(req);
+    if (bloqueado(ip)) { responder(res, 429, { erro: 'Muitas tentativas. Espere 15 minutos e tente de novo.' }); return true; }
+    let corpo = {};
+    try { corpo = JSON.parse(await lerCorpo(req, 10 * 1024)); } catch {}
+    if (!SENHA || !(iguais(String(corpo.usuario || '').trim().toLowerCase(), USUARIO.toLowerCase()) && iguais(corpo.senha || '', SENHA))) {
+      errou(ip);
+      await new Promise(r => setTimeout(r, 600));   // atrasa quem tenta adivinhar
+      responder(res, 401, { erro: 'Usuário ou senha incorretos.' });
+      return true;
+    }
+    tentativas.delete(ip);
+    const validade = Date.now() + DIAS_LOGADO * 24 * 3600 * 1000;
+    res.setHeader('Set-Cookie', cookieSessao(req, `${validade}.${assinar(`${USUARIO}|${validade}`)}`, DIAS_LOGADO * 24 * 3600));
+    responder(res, 200, { ok: true });
+    return true;
+  }
+  if (url.pathname === '/api/logout') {
+    res.setHeader('Set-Cookie', cookieSessao(req, '', 0));
+    if (req.method === 'GET') { res.writeHead(302, { Location: '/login' }); res.end(); }
+    else responder(res, 200, { ok: true });
+    return true;
+  }
+  return false;
 }
 
 const servidor = http.createServer(async (req, res) => {
-  if (!autorizado(req)) {
-    res.writeHead(401, { 'WWW-Authenticate': 'Basic realm="Fotos Casa Mar"' });
-    return res.end('Senha necessária');
-  }
   const url = new URL(req.url, 'http://x');
+  if (await rotasDeLogin(req, res, url)) return;
+  if (!autorizado(req)) {
+    // página: vai para a tela de login; API e imagens: 401
+    if (req.method === 'GET' && url.pathname === '/') { res.writeHead(302, { Location: '/login' }); return res.end(); }
+    return responder(res, 401, { erro: 'Faça login de novo.', login: true });
+  }
   const partes = url.pathname.split('/').filter(Boolean);
   try {
     if (req.method === 'GET' && url.pathname === '/') {

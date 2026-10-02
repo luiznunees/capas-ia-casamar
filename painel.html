@@ -63,6 +63,7 @@
     border-bottom: 2px solid transparent;
   }
   nav.abas a.ativa { color: var(--texto); border-bottom-color: var(--marca); }
+  nav.abas a.sair { margin-left: auto; font-size: .85rem; }
   main { max-width: 1040px; margin: 0 auto; padding: 20px 16px 56px; }
   section.aba { display: none; }
   section.aba.ativa { display: block; }
@@ -205,6 +206,7 @@
   <a href="#/controles" data-aba="controles">Controles</a>
   <a href="#/alertas" data-aba="alertas">Alertas</a>
   <a href="#/logs" data-aba="logs">Logs</a>
+  <a href="/api/logout" class="sair">Sair</a>
 </div></nav>
 
 <main>
@@ -374,6 +376,7 @@ const nomeCondo = (slug) => condominios.find(c => c.slug === slug)?.nome || slug
 async function api(caminho, opcoes) {
   const r = await fetch(caminho, opcoes);
   const j = await r.json().catch(() => ({}));
+  if (r.status === 401 && j.login) { location.href = '/login' + location.hash; throw new Error('Sessão expirada'); }
   if (!r.ok) throw new Error(j.erro || `Erro ${r.status}`);
   return j;
 }

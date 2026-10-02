@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Entrar · Capas com IA</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Montserrat:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --fundo: #f4f2ee;
+    --painel: #ffffff;
+    --texto: #1f2a2e;
+    --suave: #6b7478;
+    --linha: #e3dfd8;
+    --marca: #1f3c45;
+    --marca-texto: #ffffff;
+    --erro: #b3362b;
+    --erro-fundo: #fbe6e3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fundo: #121719;
+      --painel: #1b2225;
+      --texto: #e9ecec;
+      --suave: #9aa5a8;
+      --linha: #2c3539;
+      --marca: #7fb2c0;
+      --marca-texto: #0f1416;
+      --erro: #f0897e;
+      --erro-fundo: #3a1f1c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px 16px;
+    background: var(--fundo); color: var(--texto); font: 15px/1.5 Montserrat, system-ui, sans-serif;
+  }
+  main { width: 100%; max-width: 380px; }
+  .marca { text-align: center; margin-bottom: 22px; }
+  .marca h1 { font: 600 2.2rem/1.05 "Cormorant Garamond", serif; margin: 0; }
+  .marca p { margin: 4px 0 0; color: var(--suave); font-size: .88rem; letter-spacing: .02em; }
+  form { background: var(--painel); border: 1px solid var(--linha); border-radius: 16px; padding: 26px 24px; }
+  label { display: block; font-size: .82rem; color: var(--suave); font-weight: 500; margin-bottom: 14px; }
+  input {
+    display: block; width: 100%; margin-top: 5px; font: inherit; font-size: 1rem; padding: 12px 14px;
+    border: 1px solid var(--linha); border-radius: 10px; background: var(--painel); color: var(--texto);
+  }
+  input:focus { outline: 2px solid var(--marca); outline-offset: 1px; }
+  .senha { position: relative; display: block; }
+  .senha input { padding-right: 70px; }
+  .senha button {
+    position: absolute; right: 6px; top: 50%; transform: translateY(-50%); margin-top: 2.5px; line-height: 1;
+    background: none; border: none; color: var(--suave); font: 500 .8rem Montserrat, sans-serif; cursor: pointer; padding: 8px;
+  }
+  button.entrar {
+    width: 100%; margin-top: 6px; font: inherit; font-weight: 600; font-size: 1rem; padding: 12px; border-radius: 10px;
+    border: 1px solid var(--marca); background: var(--marca); color: var(--marca-texto); cursor: pointer;
+  }
+  button.entrar:disabled { opacity: .55; cursor: default; }
+  .erro { display: none; margin-bottom: 14px; padding: 10px 12px; border-radius: 10px; background: var(--erro-fundo); color: var(--erro); font-size: .88rem; }
+  .rodape { text-align: center; color: var(--suave); font-size: .78rem; margin-top: 18px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="marca">
+    <h1>Capas com IA</h1>
+    <p>Casa Mar Imóveis · painel</p>
+  </div>
+  <form id="entrar" autocomplete="on">
+    <div class="erro" id="erro" role="alert"></div>
+    <label>Usuário
+      <input id="usuario" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+    </label>
+    <label>Senha
+      <span class="senha">
+        <input id="senha" name="password" type="password" autocomplete="current-password" required>
+        <button type="button" id="ver" aria-label="Mostrar senha">mostrar</button>
+      </span>
+    </label>
+    <button class="entrar" type="submit" id="botao">Entrar</button>
+  </form>
+  <p class="rodape">Você fica conectado neste aparelho por 30 dias.</p>
+</main>
+<script>
+const $ = (s) => document.querySelector(s);
+$('#usuario').focus();
+$('#ver').onclick = () => {
+  const s = $('#senha');
+  s.type = s.type === 'password' ? 'text' : 'password';
+  $('#ver').textContent = s.type === 'password' ? 'mostrar' : 'ocultar';
+};
+$('#entrar').onsubmit = async (e) => {
+  e.preventDefault();
+  $('#botao').disabled = true;
+  $('#botao').textContent = 'Entrando…';
+  $('#erro').style.display = 'none';
+  try {
+    const r = await fetch('/api/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ usuario: $('#usuario').value, senha: $('#senha').value }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.erro || 'Não foi possível entrar.');
+    location.href = '/' + (location.hash || '');
+  } catch (err) {
+    $('#erro').textContent = err.message;
+    $('#erro').style.display = 'block';
+    $('#senha').select();
+    $('#botao').disabled = false;
+    $('#botao').textContent = 'Entrar';
+  }
+};
+</script>
+</body>
+</html>

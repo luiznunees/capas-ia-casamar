@@ -12,7 +12,8 @@ JET_EMAIL=...            # login do painel Jetimob
 JET_SENHA=...
 SITE_LOGIN=...           # admin do site (Atualizar Imóvel por Código)
 SITE_SENHA=...
-PAINEL_SENHA=...         # senha do painel web (o usuário pode ser qualquer um)
+PAINEL_SENHA=...         # senha da tela de login do painel
+PAINEL_USUARIO=admin     # opcional: usuário da tela de login (padrão admin)
 ```
 Horário, IA/publicação automáticas, abas, prioridades e alertas no WhatsApp se ajustam no próprio painel (abas Controles e Alertas); as variáveis `JANELA_INICIO`, `JANELA_FIM`, `IA_AUTOMATICA=nao`, `PUBLICAR_AUTOMATICO=nao`, `PARALELO` e `EVOLUTION_*` só valem enquanto nada for salvo lá.
 
