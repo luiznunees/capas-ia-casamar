@@ -218,6 +218,19 @@ const servidor = http.createServer(async (req, res) => {
     }
     if (req.method === 'GET' && url.pathname === '/api/recentes') return responder(res, 200, recentes());
 
+    // Rodadas automáticas (só quando o painel roda dentro do agendador.js)
+    if (partes[0] === 'api' && partes[1] === 'rodada') {
+      const ag = global.agendador;
+      if (!ag) return responder(res, 400, { erro: 'O painel não está rodando junto com o agendador (agendador.js).' });
+      if (req.method === 'GET') return responder(res, 200, ag.situacao());
+      if (req.method === 'POST' && (partes[2] === 'ia' || partes[2] === 'publicar')) {
+        const aberta = partes[2] === 'ia' ? ag.situacao().iaAberta : ag.situacao().pubAberta;
+        if (aberta) return responder(res, 409, { erro: `A rodada de ${partes[2]} já está em andamento.` });
+        ag[partes[2]]();   // não espera: a rodada pode levar horas
+        return responder(res, 200, { ok: true, mensagem: `Rodada de ${partes[2]} iniciada.` });
+      }
+    }
+
     // Últimas linhas do log de hoje das rodadas automáticas (agendador.js): /api/logs/ia ou /api/logs/publicar
     if (req.method === 'GET' && partes[0] === 'api' && partes[1] === 'logs' && ['ia', 'publicar'].includes(partes[2])) {
       const arq = path.join(DADOS, 'logs', `${partes[2]}-${new Date().toLocaleDateString('sv-SE')}.log`);

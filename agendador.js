@@ -83,6 +83,12 @@ function limparLogsVelhos() {
   }
 }
 
+// o painel (mesmo processo) dispara as rodadas na hora: POST /api/rodada/ia ou /api/rodada/publicar
+global.agendador = {
+  ia: cicloIA,
+  publicar: cicloPublicar,
+  situacao: () => ({ iaAberta, pubAberta, iaLigada: IA_LIGADA, pubLigada: PUB_LIGADA, minIA: MIN_IA, minPub: MIN_PUB }),
+};
 require('./painel');
 
 console.log(`[${agora()}] agendador: IA ${IA_LIGADA ? `a cada ${MIN_IA} min` : 'DESLIGADA'}, publicação ${PUB_LIGADA ? `a cada ${MIN_PUB} min` : 'DESLIGADA'}`);

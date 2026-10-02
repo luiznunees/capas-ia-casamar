@@ -175,6 +175,8 @@
     <div class="acoes" style="margin-top:0">
       <button class="sec" data-log="ia">Rodada da IA</button>
       <button class="sec" data-log="publicar">Publicação</button>
+      <button class="link" data-rodada="ia">Rodar a IA agora</button>
+      <button class="link" data-rodada="publicar">Publicar agora</button>
     </div>
     <pre class="log" id="logRodada" style="margin-top:14px;display:none"></pre>
   </div>
@@ -321,6 +323,11 @@ $('#sessaoArq').onchange = async (e) => {
   carregarSessao();
 };
 carregarSessao();
+
+document.querySelectorAll('[data-rodada]').forEach(b => b.onclick = async () => {
+  try { alert((await api(`/api/rodada/${b.dataset.rodada}`, { method: 'POST' })).mensagem); }
+  catch (e) { alert(e.message); }
+});
 
 document.querySelectorAll('[data-log]').forEach(b => b.onclick = async () => {
   const pre = $('#logRodada');
