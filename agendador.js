@@ -14,7 +14,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 const { DADOS, sessao, lerConfig } = require('./fotos');
 const { alertar } = require('./alertas');
-const { resumo } = require('./resumo');
+const { resumo, textoResumo } = require('./resumo');
 
 const LOGS = path.join(DADOS, 'logs');
 const ARQ_RODADAS = path.join(DADOS, 'rodadas.json');
@@ -47,11 +47,24 @@ const textoJanela = (cfg = lerConfig()) => (cfg.janelaInicio === cfg.janelaFim ?
 
 // ---------- sinais na saída dos scripts que viram alerta ----------
 const SINAIS = [
-  [/Não está logado no ChatGPT|Sessão do ChatGPT caiu/, 'sessao-chatgpt',
-    'O login do ChatGPT caiu: a IA parou. No Windows rode "node melhorar.js --exportar-sessao" e envie o arquivo no painel (Controles > Login do ChatGPT).'],
-  [/Login no Jetimob falhou|Sessão do Jetimob expirou/, 'login-jetimob',
-    'Não consegui entrar no Jetimob: a publicação parou. Confira JET_EMAIL/JET_SENHA no Easypanel (a senha pode ter mudado).'],
-  [/Não consegui abrir o Chrome/, 'ia-falhou', 'O Chrome não abriu no servidor; a IA não rodou. Veja os logs no painel.'],
+  [/Não está logado no ChatGPT|Sessão do ChatGPT caiu/, 'sessao-chatgpt', [
+    '⚠️ *O login do ChatGPT caiu*',
+    '_A IA parou de gerar fotos._',
+    '',
+    '*Como resolver:*',
+    '1. No Windows, na pasta do projeto: ```node melhorar.js --exportar-sessao```',
+    '2. No painel: _Controles › Login do ChatGPT_ › enviar o arquivo',
+  ].join('\n')],
+  [/Login no Jetimob falhou|Sessão do Jetimob expirou/, 'login-jetimob', [
+    '⚠️ *Não consegui entrar no Jetimob*',
+    '_A publicação parou._',
+    '',
+    'Confira ```JET_EMAIL``` e ```JET_SENHA``` no Easypanel — a senha pode ter mudado.',
+  ].join('\n')],
+  [/Não consegui abrir o Chrome/, 'ia-falhou', [
+    '⚠️ *O Chrome não abriu no servidor*',
+    '_A IA não rodou._ Veja a aba *Logs* do painel.',
+  ].join('\n')],
 ];
 
 // ---------- rodar um script ----------
@@ -93,7 +106,12 @@ function rodar(nome, args) {
       registrarRodada({ tipo: nome, args: args.slice(1).join(' '), inicio, fim: new Date().toISOString(), codigo: cod, ultimas });
       for (const [tipo, msg] of sinais) await alertar(tipo, msg);
       if (foraDoSite.size) {
-        await alertar('site-desativou', `O site desativou ${foraDoSite.size} imóvel(is) e não reativou: ${[...foraDoSite].join(', ')}.\nNo painel, abra o imóvel e clique em Publicar de novo, ou me avise.`);
+        await alertar('site-desativou', [
+          '🚨 *Imóvel fora do site*',
+          `O site desativou e não reativou: ${[...foraDoSite].map(c => `*${c}*`).join(', ')}`,
+          '',
+          '_No painel, abra o imóvel e clique em_ *Publicar de novo*.',
+        ].join('\n'));
       }
       ok(cod);
     });
@@ -144,18 +162,7 @@ async function vigiarJanela() {
     const desde = inicioJanela;
     inicioJanela = null;
     if (!cfg.iaAutomatica && !cfg.publicarAutomatico) return;
-    const r = resumo({ desde });
-    const linhas = [
-      `Resumo da madrugada (${textoJanela(cfg)}):`,
-      `• ${r.desde.geradas} foto(s) gerada(s) pela IA`,
-      `• ${r.desde.publicadas} publicada(s) no site`,
-      r.desde.erros ? `• ${r.desde.erros} erro(s) — veja no painel` : '• nenhum erro',
-      '',
-      r.total ? `No total: ${r.geradas} de ${r.total} imóveis com capa nova, ${r.publicadas} publicadas.` : `No total: ${r.geradas} geradas, ${r.publicadas} publicadas.`,
-      r.previsaoDias ? `No ritmo atual, faltam ~${r.previsaoDias} madrugada(s).` : '',
-      r.sitePendente ? `⚠️ ${r.sitePendente} publicada(s) esperando o site atualizar.` : '',
-    ].filter(l => l !== '');
-    await alertar('resumo', linhas.join('\n'));
+    await alertar('resumo', textoResumo(resumo({ desde }), textoJanela(cfg)));
   }
 }
 

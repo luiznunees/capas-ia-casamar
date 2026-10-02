@@ -61,4 +61,27 @@ function resumo({ desde } = {}) {
   return r;
 }
 
-module.exports = { resumo };
+// Mensagem do resumo da madrugada, com a formatação do WhatsApp (*negrito*, _itálico_).
+function textoResumo(r, janela) {
+  const n = (v) => (v ?? 0).toLocaleString('pt-BR');
+  const plural = (v, um, varios) => `*${n(v)}* ${v === 1 ? um : varios}`;
+  const pct = r.total ? Math.round((r.geradas / r.total) * 100) : null;
+  return [
+    `🌙 *Resumo da madrugada* _(${janela})_`,
+    '',
+    `✅ ${plural(r.desde.geradas, 'foto gerada', 'fotos geradas')} pela IA`,
+    `📤 ${plural(r.desde.publicadas, 'publicada', 'publicadas')} no site`,
+    r.desde.erros ? `❌ ${plural(r.desde.erros, 'erro', 'erros')} — _veja na Visão geral do painel_` : '✔️ _Nenhum erro_',
+    '',
+    '*Andamento geral*',
+    r.total
+      ? `• Capa nova: *${n(r.geradas)}* de *${n(r.total)}* imóveis _(${pct}%)_`
+      : `• Capa nova: *${n(r.geradas)}* imóveis`,
+    `• Publicadas: *${n(r.publicadas)}*`,
+    r.aguardandoPublicacao ? `• Esperando publicação: *${n(r.aguardandoPublicacao)}*` : null,
+    r.previsaoDias ? `⏳ _No ritmo atual (~${n(r.mediaPorDia)} por noite), faltam_ *~${n(r.previsaoDias)} madrugadas*` : null,
+    r.sitePendente ? `\n⚠️ *${n(r.sitePendente)}* publicada(s) esperando o site atualizar` : null,
+  ].filter(l => l !== null).join('\n');   // null = linha opcional que não se aplica; '' = espaço entre blocos
+}
+
+module.exports = { resumo, textoResumo };

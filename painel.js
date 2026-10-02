@@ -287,7 +287,7 @@ const servidor = http.createServer(async (req, res) => {
     }
     if (req.method === 'POST' && url.pathname === '/api/alertas/teste') {
       try {
-        await enviarTexto('🏠 Capas IA · Casa Mar\n\nTeste de alerta: se você recebeu isto, os avisos do painel estão funcionando.');
+        await enviarTexto('🏠 *Capas IA* · _Casa Mar_\n\n✅ *Teste de alerta*\n_Se você recebeu isto, os avisos do painel estão funcionando._');
         return responder(res, 200, { ok: true, mensagem: 'Mensagem de teste enviada.' });
       } catch (e) { return responder(res, 400, { erro: e.message }); }
     }

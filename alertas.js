@@ -41,7 +41,7 @@ async function alertar(tipo, texto) {
   const espera = (INTERVALO_HORAS[tipo] ?? 6) * 3600 * 1000;
   if (envios[tipo] && Date.now() - envios[tipo] < espera) return false;
   try {
-    await enviarTexto(`🏠 Capas IA · Casa Mar\n\n${texto}`, a);
+    await enviarTexto(`🏠 *Capas IA* · _Casa Mar_\n\n${texto}`, a);
     envios[tipo] = Date.now();
     fs.writeFileSync(ARQ_ENVIOS, JSON.stringify(envios));
     return true;
