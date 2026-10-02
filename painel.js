@@ -41,7 +41,8 @@ function validarConfig(c) {
   if (c.alertas) {
     const a = c.alertas;
     if (a.url && !/^https?:\/\//.test(a.url)) return 'URL da Evolution deve começar com http:// ou https://';
-    if (a.numero && String(a.numero).replace(/\D/g, '').length < 10) return 'Número do WhatsApp com DDI e DDD, ex.: 5551999999999';
+    const grupo = /^\d+(-\d+)?@g\.us$/.test(String(a.numero || '').trim());
+    if (a.numero && !grupo && String(a.numero).replace(/\D/g, '').length < 10) return 'Número do WhatsApp com DDI e DDD (ex.: 5551999999999) ou um grupo (…@g.us)';
   }
   return null;
 }

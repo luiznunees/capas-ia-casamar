@@ -18,7 +18,8 @@ function configurado(a = lerConfig().alertas) {
 async function enviarTexto(texto, a = lerConfig().alertas) {
   if (!configurado(a)) throw new Error('alertas não configurados (URL, instância, apikey e número)');
   const url = `${a.url.replace(/\/+$/, '')}/message/sendText/${encodeURIComponent(a.instancia)}`;
-  const numero = String(a.numero).replace(/\D/g, '');
+  // grupo vai como está (1203...@g.us); número fica só com os dígitos
+  const numero = String(a.numero).includes('@') ? String(a.numero).trim() : String(a.numero).replace(/\D/g, '');
   const tentar = (corpo) => fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', apikey: a.apikey },
@@ -50,4 +51,18 @@ async function alertar(tipo, texto) {
   }
 }
 
-module.exports = { alertar, enviarTexto, configurado };
+// Grupos da instância, para escolher no painel: [{ id: '1203...@g.us', nome }]
+async function listarGrupos(a = lerConfig().alertas) {
+  if (!a.url || !a.instancia || !a.apikey) throw new Error('preencha URL, instância e API key antes');
+  const r = await fetch(`${a.url.replace(/\/+$/, '')}/group/fetchAllGroups/${encodeURIComponent(a.instancia)}?getParticipants=false`, {
+    headers: { apikey: a.apikey },
+  });
+  const j = await r.json().catch(() => null);
+  if (!r.ok || !Array.isArray(j)) {
+    const msg = j?.response?.message ? [].concat(j.response.message).join(' ') : `HTTP ${r.status}`;
+    throw new Error(`Evolution: ${msg}`);
+  }
+  return j.map(g => ({ id: g.id, nome: g.subject || g.id })).sort((x, y) => x.nome.localeCompare(y.nome));
+}
+
+module.exports = { alertar, enviarTexto, configurado, listarGrupos };
