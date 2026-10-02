@@ -117,6 +117,14 @@ function gerar(codigo, urlSite) {
   }
   anotar(t, 'Abrindo o ChatGPT...');
   rodarScript(t, 'melhorar.js', [urlSite, '--forcar'], (cod) => {
+    // gerou: publica em seguida, se a publicação automática estiver ligada e o imóvel não estiver bloqueado
+    if (cod === 0 && lerConfig().publicarAutomatico && !lerLista(ARQ_REJEITADOS).includes(codigo)) {
+      anotar(t, '');
+      anotar(t, 'Foto gerada. Publicando automaticamente no Jetimob e no site...');
+      t.tipo = 'publicar';
+      publicar(codigo, 1, t);
+      return;
+    }
     t.fim = new Date().toISOString();
     t.ok = cod === 0;
   });

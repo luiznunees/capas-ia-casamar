@@ -1,6 +1,6 @@
 # Deploy no Easypanel
 
-Um app só (Dockerfile) roda tudo: painel web, IA de hora em hora e publicação a cada 15 min.
+Um app só (Dockerfile) roda tudo: painel web, IA na madrugada e publicação assim que cada foto fica pronta.
 
 ## 1. Criar o app
 Projeto → **+ Service → App**, nome `capas-ia`.

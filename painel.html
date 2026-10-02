@@ -255,7 +255,7 @@
         <label class="interruptor"><input type="checkbox" id="cfgIA"><i></i></label>
       </div>
       <div class="chave">
-        <div><b>Publicação automática</b><span class="suave">Sobe no Jetimob e atualiza o site o que a IA gerou.</span></div>
+        <div><b>Publicação automática</b><span class="suave">Assim que a IA gera, sobe no Jetimob e atualiza o site (1–2 min depois).</span></div>
         <label class="interruptor"><input type="checkbox" id="cfgPub"><i></i></label>
       </div>
       <div class="grade2" style="margin-top:14px">
@@ -509,7 +509,7 @@ function desenharImovel() {
   if (podePublicar) botoes += `<button data-acao="publicar" ${rodando ? 'disabled' : ''}>${s.publicado ? 'Publicar a nova' : 'Publicar no site'}</button>`;
   if (temCard) botoes += `<button class="sec" data-acao="gerar" ${rodando || !s.noSite ? 'disabled' : ''}>Gerar de novo</button>`;
   botoes += `<button class="link" data-acao="rejeitar">${s.rejeitado ? 'Voltar para a publicação automática' : 'Não publicar automaticamente'}</button>`;
-  const dica = !temCard ? 'A IA deixa a foto vertical sem cortar a casa, tira a marca d’água e melhora céu, luz e cores. Leva cerca de 1 minuto.'
+  const dica = !temCard ? 'A IA deixa a foto vertical sem cortar a casa, tira a marca d’água e melhora céu, luz e cores. Leva cerca de 1 minuto e, com a publicação automática ligada, já vai direto para o site.'
     : podePublicar ? 'Publicar sobe a foto como capa no Jetimob (a original fica em 2º) e atualiza o site na hora.'
     : 'Esta é a foto que está no site. “Gerar de novo” cria outra versão; a atual só sai quando você publicar a nova.';
   let tarefa = '';

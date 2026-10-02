@@ -3,7 +3,7 @@
  * Tudo é configurável pelo painel (aba Controles, salvo em $DADOS_DIR/config.json) e relido a cada ciclo:
  *   janela de horário (padrão 00h–06h), IA/publicação automáticas ligadas ou não, abas, prioridades.
  *   IA (melhorar.js --site)        começa na janela; no fim dela para de pegar imóvel novo
- *   publicar (publicar.js --todos) a cada INTERVALO_PUBLICAR_MIN minutos dentro da janela
+ *   publicar (publicar.js --todos) assim que tem foto pronta (confere a cada minuto)
  * Os botões do painel (gerar/publicar um imóvel, "Rodar agora") funcionam a qualquer hora.
  * Alertas no WhatsApp (alertas.js): login do ChatGPT/Jetimob caiu, site desativou imóvel, resumo da madrugada.
  * Logs em $DADOS_DIR/logs/<ia|publicar>-AAAA-MM-DD.log (14 dias); histórico em $DADOS_DIR/rodadas.json.
@@ -12,14 +12,13 @@
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
-const { DADOS, sessao, lerConfig } = require('./fotos');
+const { DADOS, SAIDA, sessao, lerConfig } = require('./fotos');
 const { alertar } = require('./alertas');
 const { resumo, textoResumo } = require('./resumo');
 
 const LOGS = path.join(DADOS, 'logs');
 const ARQ_RODADAS = path.join(DADOS, 'rodadas.json');
 const MIN_IA = +(process.env.INTERVALO_IA_MIN || 60);
-const MIN_PUB = +(process.env.INTERVALO_PUBLICAR_MIN || 15);
 fs.mkdirSync(LOGS, { recursive: true });
 
 const hoje = () => new Date().toLocaleDateString('sv-SE');   // AAAA-MM-DD no fuso do container (TZ)
@@ -141,13 +140,26 @@ async function cicloIA(manual = false) {
   }
 }
 
+// Tem foto pronta e não publicada (fora as bloqueadas), ou publicada esperando o site?
+function temOQuePublicar() {
+  const estado = lerJson(path.join(SAIDA, 'estado.json'), {});
+  const publicados = lerJson(path.join(SAIDA, 'publicados.json'), {});
+  const arqRej = path.join(DADOS, 'rejeitados.txt');
+  const rejeitados = new Set(fs.existsSync(arqRej) ? fs.readFileSync(arqRej, 'utf8').split(/\r?\n/).map(l => l.trim()) : []);
+  return Object.entries(estado).some(([c, e]) => /^\d+$/.test(c) && e.status === 'ok' && !publicados[c] && !rejeitados.has(c))
+    || Object.values(publicados).some(p => !p.site);
+}
+
+// Publica assim que tem foto pronta: confere a cada minuto. Automático vale dentro da janela ou
+// enquanto uma rodada da IA estiver aberta (inclusive a disparada pelo painel fora do horário).
 let pubAberta = false;
 async function cicloPublicar(manual = false) {
   if (pubAberta) return;
   const cfg = lerConfig();
   if (!manual && !cfg.publicarAutomatico) return;
-  const fim = manual ? SEM_PRAZO : fimDaJanela(cfg);
+  const fim = manual || (iaAberta && !fimDaJanela(cfg)) ? SEM_PRAZO : fimDaJanela(cfg);
   if (!fim) return;
+  if (!manual && !temOQuePublicar()) return;
   pubAberta = true;
   try { await rodar('publicar', ['publicar.js', '--todos', ...prazoArgs(fim)]); } finally { pubAberta = false; }
 }
@@ -182,7 +194,7 @@ global.agendador = {
     const cfg = lerConfig();
     return {
       iaAberta, pubAberta, iaLigada: cfg.iaAutomatica, pubLigada: cfg.publicarAutomatico,
-      janela: textoJanela(cfg), dentroDaJanela: !!fimDaJanela(cfg), minIA: MIN_IA, minPub: MIN_PUB,
+      janela: textoJanela(cfg), dentroDaJanela: !!fimDaJanela(cfg), minIA: MIN_IA,
       rodadas: lerJson(ARQ_RODADAS, []).slice(-12).reverse(),
     };
   },
@@ -193,8 +205,8 @@ console.log(`[${agora()}] agendador: janela ${textoJanela()} · config em ${path
 // a cada 5 min cada ciclo decide se é hora (janela, interruptores e intervalo vêm da config)
 setTimeout(() => cicloIA(), 20 * 1000);
 setInterval(() => cicloIA(), 5 * 60 * 1000);
-setTimeout(() => cicloPublicar(), 90 * 1000);
-setInterval(() => cicloPublicar(), MIN_PUB * 60 * 1000);
+setTimeout(() => cicloPublicar(), 60 * 1000);
+setInterval(() => cicloPublicar(), 60 * 1000);
 setInterval(vigiarJanela, 60 * 1000);
 limparLogsVelhos();
 setInterval(limparLogsVelhos, 24 * 3600 * 1000);
