@@ -322,6 +322,17 @@ $('#sessaoArq').onchange = async (e) => {
 };
 carregarSessao();
 
+document.querySelectorAll('[data-log]').forEach(b => b.onclick = async () => {
+  const pre = $('#logRodada');
+  pre.style.display = 'block';
+  pre.textContent = 'Carregando…';
+  try {
+    const r = await api(`/api/logs/${b.dataset.log}`);
+    pre.textContent = r.linhas.filter(Boolean).join('\n') || `Ainda não há ${r.arquivo} hoje.`;
+    pre.scrollTop = pre.scrollHeight;
+  } catch (e) { pre.textContent = e.message; }
+});
+
 $('#busca').onsubmit = (e) => { e.preventDefault(); buscar($('#codigo').value); };
 window.onhashchange = () => {
   const c = location.hash.slice(1);
