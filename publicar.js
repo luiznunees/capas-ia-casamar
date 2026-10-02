@@ -38,6 +38,8 @@ const TESTE = flag('teste');
 const TODOS = flag('todos');
 const VER = flag('ver');
 const SO_SITE = flag('so-site');
+// --ate=<data ISO>: depois disso não pega imóvel novo (janela da madrugada do agendador.js)
+const PRAZO = valor('ate') ? Date.parse(valor('ate')) : null;
 const MAX = +(valor('max') || 0);
 const PAUSA = +(valor('pausa') || 5);
 const CODIGOS = args.filter(a => !a.startsWith('--'));
@@ -251,6 +253,7 @@ function pegarTrava() {
       }
       try {
         for (const [i, codigo] of fila.entries()) {
+          if (PRAZO && Date.now() > PRAZO) { console.log('Fim da janela de horário; o resto fica para a próxima.'); break; }
           const arquivo = path.join(SAIDA, `${codigo}_card-ia.jpg`);
           if (!fs.existsSync(arquivo)) { console.log(`✗ ${codigo}: não existe ${arquivo}`); falhas.push(codigo); continue; }
           if (!TESTE && !TODOS && publicados[codigo]) console.log(`   aviso: ${codigo} já foi publicado em ${publicados[codigo].data}; publicando de novo`);

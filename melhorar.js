@@ -60,6 +60,8 @@ const MAX = +(valor('max') || 0);              // 0 = sem limite
 const PAUSA = +(valor('pausa') || 20);
 const PARALELO = Math.max(1, +(valor('paralelo') || 3));
 const MANTER_CHATS = flag('manter-chats');
+// --ate=<data ISO>: depois disso não pega imóvel novo da fila (janela da madrugada do agendador.js)
+const PRAZO = valor('ate') ? Date.parse(valor('ate')) : null;
 const EXPORTAR = flag('exportar-sessao') ? (valor('exportar-sessao') || path.join(__dirname, 'sessao-chatgpt.json')) : null;
 const IMPORTAR = valor('importar-sessao');
 const INTERATIVO = SO_LOGIN || !!EXPORTAR || !!process.stdout.isTTY;
@@ -471,6 +473,7 @@ function pegarUrgente() {
         const mesmaFoto = anterior?.origem === foto.origem;
         if (!forcar && mesmaFoto && anterior.status === 'ok' && fs.existsSync(destino)) { puladas++; return false; }
         if (!forcar && mesmaFoto && anterior.status === 'erro' && anterior.tentativas >= MAX_TENTATIVAS) { puladas++; return false; }
+        if (!forcar && mesmaFoto && anterior.status === 'ja-ia') { puladas++; return false; }
         if (MAX && feitas >= MAX) { parar = true; return false; }
         const n = ++feitas;
 
@@ -482,8 +485,19 @@ function pegarUrgente() {
           original = fs.readFileSync(arqEntrada);
           origem = anterior?.origem || origem;
         } else {
-          // o ChatGPT aceita melhor JPG/PNG; webp vira PNG
           original = await foto.ler();
+          // Capa em 1024x1280 é o tamanho exato que esta automação publica: a capa já é uma foto nossa
+          // (o registro de publicação se perdeu ou veio de outra máquina). Gerar em cima dela seria IA da IA.
+          const dims = await sharp(original).metadata();
+          if (dims.width === 1024 && dims.height === 1280) {
+            feitas--;
+            estado[nome] = { origem, status: 'ja-ia', data: new Date().toISOString() };
+            salvarEstado();
+            console.log(`- ${nome}: a capa do site já é uma foto da IA (1024x1280), pulando`);
+            puladas++;
+            return false;
+          }
+          // o ChatGPT aceita melhor JPG/PNG; webp vira PNG
           await sharp(original).rotate().png().toFile(arqEntrada);
         }
 
@@ -532,6 +546,11 @@ function pegarUrgente() {
           continue;
         }
         if (proximo >= alvos.length) break;
+        if (PRAZO && Date.now() > PRAZO) {
+          if (!parar) console.log(`\n[${new Date().toLocaleString('pt-BR')}] Fim da janela de horário; continua na próxima.`);
+          parar = true;
+          break;
+        }
         const i = proximo++;
         const usouChatGPT = await processar(aba, alvos[i], i);
         if (usouChatGPT && !parar && proximo < alvos.length) await espera((PAUSA + Math.random() * PAUSA * 0.6) * 1000);

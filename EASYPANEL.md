@@ -14,7 +14,7 @@ SITE_LOGIN=...           # admin do site (Atualizar Imóvel por Código)
 SITE_SENHA=...
 PAINEL_SENHA=...         # senha do painel web (o usuário pode ser qualquer um)
 ```
-Opcionais: `IA_AUTOMATICA=nao`, `PUBLICAR_AUTOMATICO=nao`, `INTERVALO_IA_MIN=60`, `INTERVALO_PUBLICAR_MIN=15`.
+Opcionais: `JANELA_INICIO=0` e `JANELA_FIM=6` (horário das rodadas automáticas; padrão 00h–06h), `IA_AUTOMATICA=nao`, `PUBLICAR_AUTOMATICO=nao`, `INTERVALO_PUBLICAR_MIN=15`.
 
 ## 3. Mounts
 **Volume**, nome `dados`, mount path `/dados`.

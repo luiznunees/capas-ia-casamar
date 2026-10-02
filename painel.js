@@ -231,6 +231,26 @@ const servidor = http.createServer(async (req, res) => {
       }
     }
 
+    // Sincroniza um imóvel trabalhado em outra máquina: registro de publicação, estado e fotos (base64).
+    // Corpo: { estado?, publicado?, antes?, card? }
+    if (req.method === 'POST' && partes[0] === 'api' && partes[1] === 'sincronizar' && /^\d{1,9}$/.test(partes[2] || '')) {
+      const codigo = partes[2];
+      const corpo = JSON.parse(await lerCorpo(req, 30 * 1024 * 1024));
+      fs.mkdirSync(PASTA_ORIG, { recursive: true });
+      if (corpo.antes) fs.writeFileSync(path.join(PASTA_ORIG, `${codigo}_antes.png`), Buffer.from(corpo.antes, 'base64'));
+      if (corpo.card) fs.writeFileSync(path.join(SAIDA, `${codigo}_card-ia.jpg`), Buffer.from(corpo.card, 'base64'));
+      const gravarJson = (arq, valor) => {
+        if (!valor) return;
+        const todos = lerJson(arq, {});
+        todos[codigo] = valor;
+        fs.writeFileSync(arq + '.tmp', JSON.stringify(todos, null, 1));
+        fs.renameSync(arq + '.tmp', arq);
+      };
+      gravarJson(ARQ_ESTADO, corpo.estado);
+      gravarJson(ARQ_PUBLICADOS, corpo.publicado);
+      return responder(res, 200, await status(codigo));
+    }
+
     // Últimas linhas do log de hoje das rodadas automáticas (agendador.js): /api/logs/ia ou /api/logs/publicar
     if (req.method === 'GET' && partes[0] === 'api' && partes[1] === 'logs' && ['ia', 'publicar'].includes(partes[2])) {
       const arq = path.join(DADOS, 'logs', `${partes[2]}-${new Date().toLocaleDateString('sv-SE')}.log`);

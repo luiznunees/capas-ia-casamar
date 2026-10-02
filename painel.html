@@ -172,6 +172,7 @@
 
   <h3 class="secao">Logs de hoje</h3>
   <div class="cartao">
+    <p id="janelaInfo" style="margin:0 0 12px;color:var(--suave)"></p>
     <div class="acoes" style="margin-top:0">
       <button class="sec" data-log="ia">Rodada da IA</button>
       <button class="sec" data-log="publicar">Publicação</button>
@@ -323,6 +324,13 @@ $('#sessaoArq').onchange = async (e) => {
   carregarSessao();
 };
 carregarSessao();
+
+api('/api/rodada').then(r => {
+  const estado = [r.iaAberta ? 'IA rodando agora' : null, r.pubAberta ? 'publicação rodando agora' : null].filter(Boolean).join(' · ');
+  $('#janelaInfo').textContent = `Rodadas automáticas: ${r.janela} (horário de Brasília)` +
+    `${r.iaLigada ? '' : ' · IA automática desligada'}${r.pubLigada ? '' : ' · publicação automática desligada'}` +
+    (estado ? ` · ${estado}` : '');
+}).catch(() => {});
 
 document.querySelectorAll('[data-rodada]').forEach(b => b.onclick = async () => {
   try { alert((await api(`/api/rodada/${b.dataset.rodada}`, { method: 'POST' })).mensagem); }
