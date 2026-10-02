@@ -13,7 +13,7 @@ JET_SENHA=...
 SITE_LOGIN=...           # admin do site (Atualizar Imóvel por Código)
 SITE_SENHA=...
 PAINEL_SENHA=...         # senha da tela de login do painel
-PAINEL_USUARIO=admin     # opcional: usuário da tela de login (padrão admin)
+PAINEL_USUARIO=admin     # opcional: usuário do administrador (padrão admin)
 ```
 Horário, IA/publicação automáticas, abas, prioridades e alertas no WhatsApp se ajustam no próprio painel (abas Controles e Alertas); as variáveis `JANELA_INICIO`, `JANELA_FIM`, `IA_AUTOMATICA=nao`, `PUBLICAR_AUTOMATICO=nao`, `PARALELO` e `EVOLUTION_*` só valem enquanto nada for salvo lá.
 
@@ -38,3 +38,6 @@ O Chrome com 3 abas do ChatGPT usa ~1,5–2 GB de RAM. Se a VPS for pequena, use
 - O ChatGPT pode pedir verificação (Cloudflare) para o IP da VPS. Se a IA falhar com "Resposta sem imagem",
   veja `/dados/saida/debug-ultimo-erro.png`.
 - A sessão do ChatGPT expira de tempos em tempos: repita os passos 2 e 3.
+
+## Acessos para acompanhar
+No painel, **Controles → Acessos para acompanhar**: crie logins só de visualização (veem visão geral, fotos e logs; não alteram nada). Ficam em `/dados/config.json` com a senha criptografada.

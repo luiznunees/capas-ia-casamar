@@ -29,10 +29,11 @@ const { enviarTexto, configurado } = require('./alertas');
 const MASCARA = '••••••••';
 let cacheCondominios = null;
 function configPublica() {
-  const c = lerConfig();
+  const { leitores, ...c } = lerConfig();   // acessos têm rota própria (/api/acessos); hash nunca sai daqui
   return { ...c, alertas: { ...c.alertas, apikey: c.alertas.apikey ? MASCARA : '' } };
 }
 function validarConfig(c) {
+  if ('leitores' in c) return 'Acessos se gerenciam em /api/acessos.';
   const hora = (h) => Number.isInteger(h) && h >= 0 && h <= 23;
   if ('janelaInicio' in c && !hora(c.janelaInicio)) return 'Hora de início inválida (0 a 23).';
   if ('janelaFim' in c && !hora(c.janelaFim)) return 'Hora de fim inválida (0 a 23).';
@@ -226,8 +227,10 @@ function responder(res, cod, corpo, tipo = 'application/json; charset=utf-8') {
 }
 
 // ---------- login ----------
-// Cookie assinado (validade + HMAC com a senha): sobrevive a reinícios e deploys, e cai sozinho se
-// a senha mudar. Basic auth continua valendo para chamadas de API (scripts, curl).
+// Dois papéis: "admin" (PAINEL_USUARIO/PAINEL_SENHA do Easypanel) e "leitura" (acessos criados no
+// painel, aba Controles, guardados com hash scrypt em config.json). Cookie assinado com HMAC:
+// sobrevive a reinícios e deploys, e cai sozinho se a senha mudar ou o acesso for removido.
+// Basic auth continua valendo só para o admin (chamadas de API, scripts, curl).
 const USUARIO = process.env.PAINEL_USUARIO || 'admin';
 const DIAS_LOGADO = 30;
 const COOKIE = 'capas_sessao';
@@ -236,20 +239,52 @@ const iguais = (a, b) => {
   const x = Buffer.from(String(a)), y = Buffer.from(String(b));
   return x.length === y.length && crypto.timingSafeEqual(x, y);
 };
+const normalizar = (u) => String(u || '').trim().toLowerCase();
 
-function sessaoValida(req) {
-  const m = (req.headers.cookie || '').match(new RegExp(`(?:^|;\\s*)${COOKIE}=([^;]+)`));
-  if (!m) return false;
-  const [validade, assinatura] = decodeURIComponent(m[1]).split('.');
-  return +validade > Date.now() && iguais(assinatura || '', assinar(`${USUARIO}|${validade}`));
+// ---------- acessos de leitura ----------
+const hashSenha = (senha, sal) => crypto.scryptSync(String(senha), sal, 32).toString('base64url');
+const leitores = () => lerConfig().leitores || [];
+function conferirLeitor(usuario, senha) {
+  const l = leitores().find(x => x.usuario === normalizar(usuario));
+  return l && iguais(hashSenha(senha, l.sal), l.hash) ? l : null;
 }
 
-function autorizado(req) {
-  if (!SENHA) return true;
-  if (sessaoValida(req)) return true;
+// O que entra na assinatura: trocar a senha (hash) ou remover o acesso invalida o cookie.
+function segredoDe(usuario, papel) {
+  if (papel === 'admin') return normalizar(usuario) === normalizar(USUARIO) ? 'admin' : null;
+  return leitores().find(x => x.usuario === usuario)?.hash || null;
+}
+function tokenDe(usuario, papel, validade) {
+  return `${validade}.${encodeURIComponent(usuario)}.${papel}.${assinar(`${usuario}|${papel}|${validade}|${segredoDe(usuario, papel)}`)}`;
+}
+
+// { usuario, papel } da sessão, ou null
+function sessaoDe(req) {
+  const m = (req.headers.cookie || '').match(new RegExp(`(?:^|;\\s*)${COOKIE}=([^;]+)`));
+  if (!m) return null;
+  const [validade, usuarioCod, papel, assinatura] = decodeURIComponent(m[1]).split('.');
+  const usuario = decodeURIComponent(usuarioCod || '');
+  if (!(+validade > Date.now()) || !['admin', 'leitura'].includes(papel) || !segredoDe(usuario, papel)) return null;
+  return iguais(assinatura || '', assinar(`${usuario}|${papel}|${validade}|${segredoDe(usuario, papel)}`)) ? { usuario, papel } : null;
+}
+
+function quemE(req) {
+  if (!SENHA) return { usuario: 'local', papel: 'admin' };
+  const s = sessaoDe(req);
+  if (s) return s;
   const [tipo, valor] = (req.headers.authorization || '').split(' ');
-  if (tipo !== 'Basic' || !valor) return false;
-  return iguais(Buffer.from(valor, 'base64').toString().split(':').slice(1).join(':'), SENHA);
+  if (tipo === 'Basic' && valor && iguais(Buffer.from(valor, 'base64').toString().split(':').slice(1).join(':'), SENHA)) {
+    return { usuario: USUARIO, papel: 'admin' };
+  }
+  return null;
+}
+
+// Leitura: só GET e só o que é para ver. Config, sessão do ChatGPT, fila, acessos e alertas ficam de fora.
+const SO_ADMIN = ['/api/config', '/api/sessao', '/api/fila', '/api/acessos', '/api/alertas', '/api/sincronizar'];
+function permitido(quem, req, url) {
+  if (quem.papel === 'admin') return true;
+  if (req.method !== 'GET') return false;
+  return !SO_ADMIN.some(p => url.pathname === p || url.pathname.startsWith(p + '/'));
 }
 
 function cookieSessao(req, valor, maxAge) {
@@ -273,7 +308,7 @@ function errou(ip) {
 
 async function rotasDeLogin(req, res, url) {
   if (req.method === 'GET' && url.pathname === '/login') {
-    if (!SENHA || sessaoValida(req)) { res.writeHead(302, { Location: '/' }); res.end(); return true; }
+    if (!SENHA || sessaoDe(req)) { res.writeHead(302, { Location: '/' }); res.end(); return true; }
     responder(res, 200, fs.readFileSync(path.join(__dirname, 'login.html')), 'text/html; charset=utf-8');
     return true;
   }
@@ -282,16 +317,21 @@ async function rotasDeLogin(req, res, url) {
     if (bloqueado(ip)) { responder(res, 429, { erro: 'Muitas tentativas. Espere 15 minutos e tente de novo.' }); return true; }
     let corpo = {};
     try { corpo = JSON.parse(await lerCorpo(req, 10 * 1024)); } catch {}
-    if (!SENHA || !(iguais(String(corpo.usuario || '').trim().toLowerCase(), USUARIO.toLowerCase()) && iguais(corpo.senha || '', SENHA))) {
+    const usuario = normalizar(corpo.usuario);
+    let papel = null;
+    if (SENHA && iguais(usuario, normalizar(USUARIO)) && iguais(corpo.senha || '', SENHA)) papel = 'admin';
+    else if (SENHA && conferirLeitor(usuario, corpo.senha || '')) papel = 'leitura';
+    if (!papel) {
       errou(ip);
       await new Promise(r => setTimeout(r, 600));   // atrasa quem tenta adivinhar
       responder(res, 401, { erro: 'Usuário ou senha incorretos.' });
       return true;
     }
     tentativas.delete(ip);
+    const nome = papel === 'admin' ? USUARIO : usuario;
     const validade = Date.now() + DIAS_LOGADO * 24 * 3600 * 1000;
-    res.setHeader('Set-Cookie', cookieSessao(req, `${validade}.${assinar(`${USUARIO}|${validade}`)}`, DIAS_LOGADO * 24 * 3600));
-    responder(res, 200, { ok: true });
+    res.setHeader('Set-Cookie', cookieSessao(req, tokenDe(nome, papel, validade), DIAS_LOGADO * 24 * 3600));
+    responder(res, 200, { ok: true, papel });
     return true;
   }
   if (url.pathname === '/api/logout') {
@@ -303,16 +343,46 @@ async function rotasDeLogin(req, res, url) {
   return false;
 }
 
+// Acessos de leitura (só admin): listar, criar/trocar senha, remover.
+async function rotasDeAcessos(req, res, url, partes) {
+  if (partes[0] !== 'api' || partes[1] !== 'acessos') return false;
+  const lista = () => leitores().map(l => ({ usuario: l.usuario, criado: l.criado }));
+  if (req.method === 'GET' && !partes[2]) { responder(res, 200, lista()); return true; }
+  if (req.method === 'POST' && !partes[2]) {
+    const { usuario, senha } = JSON.parse(await lerCorpo(req, 10 * 1024));
+    const u = normalizar(usuario);
+    if (!/^[a-z0-9._-]{3,30}$/.test(u)) { responder(res, 400, { erro: 'Usuário: 3 a 30 letras minúsculas, números, ponto, hífen ou _.' }); return true; }
+    if (u === normalizar(USUARIO)) { responder(res, 400, { erro: 'Esse é o usuário do administrador.' }); return true; }
+    if (String(senha || '').length < 8) { responder(res, 400, { erro: 'A senha precisa de pelo menos 8 caracteres.' }); return true; }
+    const sal = crypto.randomBytes(16).toString('base64url');
+    const outros = leitores().filter(l => l.usuario !== u);
+    salvarConfig({ leitores: [...outros, { usuario: u, sal, hash: hashSenha(senha, sal), criado: new Date().toISOString() }] });
+    responder(res, 200, lista());
+    return true;
+  }
+  if (req.method === 'DELETE' && partes[2]) {
+    const u = normalizar(decodeURIComponent(partes[2]));
+    salvarConfig({ leitores: leitores().filter(l => l.usuario !== u) });
+    responder(res, 200, lista());
+    return true;
+  }
+  return false;
+}
+
 const servidor = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
   if (await rotasDeLogin(req, res, url)) return;
-  if (!autorizado(req)) {
+  const quem = quemE(req);
+  if (!quem) {
     // página: vai para a tela de login; API e imagens: 401
     if (req.method === 'GET' && url.pathname === '/') { res.writeHead(302, { Location: '/login' }); return res.end(); }
     return responder(res, 401, { erro: 'Faça login de novo.', login: true });
   }
+  if (!permitido(quem, req, url)) return responder(res, 403, { erro: 'Seu acesso é só para visualizar.' });
   const partes = url.pathname.split('/').filter(Boolean);
   try {
+    if (req.method === 'GET' && url.pathname === '/api/eu') return responder(res, 200, quem);
+    if (await rotasDeAcessos(req, res, url, partes)) return;
     if (req.method === 'GET' && url.pathname === '/') {
       return responder(res, 200, fs.readFileSync(path.join(__dirname, 'painel.html')), 'text/html; charset=utf-8');
     }

@@ -64,6 +64,10 @@
   }
   nav.abas a.ativa { color: var(--texto); border-bottom-color: var(--marca); }
   nav.abas a.sair { margin-left: auto; font-size: .85rem; }
+  /* acesso de visualização: some tudo que altera algo */
+  .aviso-leitura { display: none; padding: 10px 14px; border-radius: 10px; background: var(--neutro-fundo); color: var(--suave); font-size: .85rem; margin-bottom: 16px; }
+  body.leitura .aviso-leitura { display: block; }
+  body.leitura .so-admin, body.leitura .acoes, body.leitura [data-aba="controles"], body.leitura [data-aba="alertas"] { display: none !important; }
   main { max-width: 1040px; margin: 0 auto; padding: 20px 16px 56px; }
   section.aba { display: none; }
   section.aba.ativa { display: block; }
@@ -210,6 +214,7 @@
 </div></nav>
 
 <main>
+  <div class="aviso-leitura">👁️ Acesso de visualização — você acompanha tudo, mas não altera nada.</div>
   <div id="erro"></div>
 
   <!-- ================= VISÃO GERAL ================= -->
@@ -310,6 +315,22 @@
       <div id="filaUrgente" class="suave pequeno" style="margin-top:10px"></div>
     </div>
 
+    <h2 class="titulo">Acessos para acompanhar</h2>
+    <div class="cartao">
+      <p class="suave" style="margin:0 0 10px">Logins <b>só de visualização</b>: veem a visão geral, as fotos e os logs, mas não mexem em nada.</p>
+      <div id="acessos"></div>
+      <div class="grade2" style="margin-top:14px">
+        <label class="campo">Usuário<input id="acUsuario" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="ex.: patrao"></label>
+        <label class="campo">Senha (mín. 8)<input id="acSenha" autocomplete="new-password" spellcheck="false"></label>
+      </div>
+      <div class="linha-acoes">
+        <button id="criarAcesso">Criar acesso</button>
+        <button class="link" id="gerarSenha">gerar senha</button>
+        <span class="salvo" id="salvoAcesso"></span>
+      </div>
+      <p class="suave pequeno" style="margin:10px 0 0">Para trocar a senha de alguém, crie de novo com o mesmo usuário. A pessoa entra em <b class="endereco"></b>.</p>
+    </div>
+
     <h2 class="titulo">Login do ChatGPT</h2>
     <div class="cartao">
       <p id="sessaoInfo" class="suave" style="margin:0 0 12px">…</p>
@@ -388,7 +409,8 @@ function avisoSalvo(id, texto = 'Salvo ✓') { const el = $(id); el.textContent 
 let atualizarAba = null;
 function rota() {
   const [, aba = 'visao', arg] = location.hash.split('/');
-  const nome = ['visao', 'imovel', 'controles', 'alertas', 'logs'].includes(aba) ? aba : 'visao';
+  const abas = papel === 'leitura' ? ['visao', 'imovel', 'logs'] : ['visao', 'imovel', 'controles', 'alertas', 'logs'];
+  const nome = abas.includes(aba) ? aba : 'visao';
   document.querySelectorAll('nav.abas a').forEach(a => a.classList.toggle('ativa', a.dataset.aba === nome));
   document.querySelectorAll('section.aba').forEach(s => s.classList.toggle('ativa', s.id === `aba-${nome}`));
   mostrarErro('');
@@ -407,16 +429,17 @@ window.onhashchange = rota;
 async function carregarVisao() {
   try {
     const r = await api('/api/resumo');
-    const rd = r.rodada || {};
+    const rd = r.rodada;   // null quando o painel roda sem o agendador (local)
+    const admin = papel !== 'leitura';
     const selos = [
-      [rd.iaLigada ? 'ok' : 'aviso', `IA automática ${rd.iaLigada ? 'ligada' : 'desligada'}`],
-      [rd.pubLigada ? 'ok' : 'aviso', `Publicação automática ${rd.pubLigada ? 'ligada' : 'desligada'}`],
-      ['', `Horário: ${rd.janela || '—'}${rd.dentroDaJanela ? ' (agora)' : ''}`],
-      rd.iaAberta ? ['ok', 'IA rodando agora'] : null,
-      rd.pubAberta ? ['ok', 'Publicando agora'] : null,
-      r.sessao.pendente ? ['aviso', 'Sessão do ChatGPT aguardando importação']
+      rd ? [rd.iaLigada ? 'ok' : 'aviso', `IA automática ${rd.iaLigada ? 'ligada' : 'desligada'}`] : null,
+      rd ? [rd.pubLigada ? 'ok' : 'aviso', `Publicação automática ${rd.pubLigada ? 'ligada' : 'desligada'}`] : null,
+      rd ? ['', `Horário: ${rd.janela}${rd.dentroDaJanela ? ' (agora)' : ''}`] : null,
+      rd?.iaAberta ? ['ok', 'IA rodando agora'] : null,
+      rd?.pubAberta ? ['ok', 'Publicando agora'] : null,
+      !admin ? null : r.sessao.pendente ? ['aviso', 'Sessão do ChatGPT aguardando importação']
         : r.sessao.importada ? ['', `Login ChatGPT enviado ${quando(new Date(r.sessao.importada).toISOString())}`] : ['erro', 'Sem login do ChatGPT'],
-      r.alertasConfigurados ? ['', 'Alertas no WhatsApp ativos'] : ['aviso', 'Alertas no WhatsApp não configurados'],
+      !admin ? null : r.alertasConfigurados ? ['', 'Alertas no WhatsApp ativos'] : ['aviso', 'Alertas no WhatsApp não configurados'],
     ].filter(Boolean);
     $('#situacao').innerHTML = selos.map(([c, t]) => `<span class="selo ${c}">${esc(t)}</span>`).join('');
 
@@ -563,7 +586,7 @@ for (const id of ['#cfgIni', '#cfgFim']) $(id).innerHTML = [...Array(24).keys()]
 
 async function carregarControles() {
   try {
-    const [cfg] = await Promise.all([api('/api/config'), carregarCondominios(), carregarSessao(), carregarUrgente()]);
+    const [cfg] = await Promise.all([api('/api/config'), carregarCondominios(), carregarSessao(), carregarUrgente(), carregarAcessos()]);
     $('#cfgIA').checked = cfg.iaAutomatica;
     $('#cfgPub').checked = cfg.publicarAutomatico;
     $('#cfgIni').value = cfg.janelaInicio;
@@ -694,7 +717,41 @@ document.querySelectorAll('[data-log]').forEach(b => b.onclick = async () => {
   } catch (e) { pre.textContent = e.message; }
 });
 
-carregarCondominios().then(rota);
+// ================= ACESSOS (só admin) =================
+async function carregarAcessos() {
+  const l = await api('/api/acessos');
+  $('#acessos').innerHTML = l.length ? `<table><tbody>${l.map(a => `
+    <tr><td><b>${esc(a.usuario)}</b></td><td class="suave pequeno">criado ${quando(a.criado)}</td>
+    <td style="text-align:right"><button class="link mini" data-remover="${esc(a.usuario)}">remover</button></td></tr>`).join('')}</tbody></table>`
+    : '<span class="suave">Nenhum acesso de visualização ainda.</span>';
+  document.querySelectorAll('[data-remover]').forEach(b => b.onclick = async () => {
+    if (!confirm(`Remover o acesso de ${b.dataset.remover}? Ele sai na hora.`)) return;
+    try { await api(`/api/acessos/${encodeURIComponent(b.dataset.remover)}`, { method: 'DELETE' }); carregarAcessos(); }
+    catch (e) { mostrarErro(e.message); }
+  });
+}
+$('#gerarSenha').onclick = () => {
+  const letras = 'abcdefghjkmnpqrstuvwxyz23456789';
+  const r = crypto.getRandomValues(new Uint32Array(10));
+  $('#acSenha').value = [...r].map(n => letras[n % letras.length]).join('').replace(/(.{5})/, '$1-');
+};
+$('#criarAcesso').onclick = async () => {
+  const usuario = $('#acUsuario').value.trim(), senha = $('#acSenha').value;
+  try {
+    await postJson('/api/acessos', { usuario, senha });
+    $('#salvoAcesso').textContent = `Acesso criado ✓  usuário: ${usuario.toLowerCase()}  ·  senha: ${senha}  (anote, ela não aparece de novo)`;
+    $('#acUsuario').value = ''; $('#acSenha').value = '';
+    carregarAcessos();
+  } catch (e) { mostrarErro(e.message); }
+};
+
+document.querySelectorAll('.endereco').forEach(e => e.textContent = location.origin);
+
+// quem está logado: leitura esconde o que altera algo (o servidor também recusa)
+let papel = 'admin';
+api('/api/eu').then(eu => { papel = eu.papel; document.body.classList.toggle('leitura', papel === 'leitura'); })
+  .catch(() => {})
+  .finally(() => carregarCondominios().then(rota));
 </script>
 </body>
 </html>
