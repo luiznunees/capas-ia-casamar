@@ -18,7 +18,7 @@ const { resumo, textoResumo } = require('./resumo');
 
 const LOGS = path.join(DADOS, 'logs');
 const ARQ_RODADAS = path.join(DADOS, 'rodadas.json');
-const MIN_IA = +(process.env.INTERVALO_IA_MIN || 60);
+const MIN_IA = +(process.env.INTERVALO_IA_MIN || 10);   // rodada que acabou antes da hora volta depois disso
 fs.mkdirSync(LOGS, { recursive: true });
 
 const hoje = () => new Date().toLocaleDateString('sv-SE');   // AAAA-MM-DD no fuso do container (TZ)
@@ -146,7 +146,7 @@ function temOQuePublicar() {
   const publicados = lerJson(path.join(SAIDA, 'publicados.json'), {});
   const arqRej = path.join(DADOS, 'rejeitados.txt');
   const rejeitados = new Set(fs.existsSync(arqRej) ? fs.readFileSync(arqRej, 'utf8').split(/\r?\n/).map(l => l.trim()) : []);
-  return Object.entries(estado).some(([c, e]) => /^\d+$/.test(c) && e.status === 'ok' && !publicados[c] && !rejeitados.has(c))
+  return Object.entries(estado).some(([c, e]) => /^\d+$/.test(c) && e.status === 'ok' && (!publicados[c] || (publicados[c].refazer && e.data > publicados[c].data)) && !rejeitados.has(c))
     || Object.values(publicados).some(p => !p.site);
 }
 

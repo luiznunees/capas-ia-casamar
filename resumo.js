@@ -45,7 +45,7 @@ function resumo({ desde } = {}) {
   const r = {
     total, geradas, publicadas: pubs.length, sitePendente: pubs.filter(([, p]) => !p.site).length,
     erros: erros.length, jaIA, rejeitados: rejeitados().length, restantes,
-    aguardandoPublicacao: imoveis.filter(([c, e]) => e.status === 'ok' && !publicados[c]).length,
+    aguardandoPublicacao: imoveis.filter(([c, e]) => e.status === 'ok' && (!publicados[c] || (publicados[c].refazer && e.data > publicados[c].data))).length,
     mediaPorDia, previsaoDias: restantes && mediaPorDia ? Math.ceil(restantes / mediaPorDia) : null,
     dias, condominios, filaEm: fila?.em || null,
     ultimosErros: erros.sort((a, b) => (b[1].data > a[1].data ? 1 : -1)).slice(0, 8)

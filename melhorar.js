@@ -126,6 +126,16 @@ async function logado(page) {
   return caixa > 0 && botaoLogin === 0;
 }
 
+// Depois de um erro: o login só "caiu" se continuar sem sessão após recarregar, 3 vezes.
+async function loginConfirmado(page) {
+  for (let i = 0; i < 3; i++) {
+    await page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await espera(4000 + i * 6000);
+    if (await logado(page).catch(() => false)) return true;
+  }
+  return false;
+}
+
 async function garantirLogin(page) {
   await page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded' });
   await espera(4000);
@@ -283,10 +293,12 @@ async function esperarEBaixar(page) {
           .filter(t => !t.querySelector('[data-message-author-role="user"]'));
         turno = turnos[turnos.length - 1] || null;
       }
-      // a foto enviada também é uma imagem grande: ignora tudo que está na mensagem do usuário
+      // A foto enviada também é uma imagem grande: só vale imagem da resposta, e nunca uma que
+      // apareça na mensagem do usuário (antes havia um "plano B" que pegava qualquer imagem da
+      // página e, quando o ChatGPT não gerava nada, devolvia a própria foto original).
+      const daMensagemDoUsuario = new Set([...raiz.querySelectorAll('[data-message-author-role="user"] img')].map(i => i.src));
       let imgs = turno ? [...turno.querySelectorAll('img')] : [];
-      if (!imgs.some(i => i.naturalWidth >= 512)) imgs = [...raiz.querySelectorAll('img')].filter(i => !i.closest('[data-message-author-role="user"]'));
-      imgs = imgs.filter(i => i.naturalWidth >= 512 && i.complete);
+      imgs = imgs.filter(i => i.naturalWidth >= 512 && i.complete && !i.closest('[data-message-author-role="user"]') && !daMensagemDoUsuario.has(i.src));
       const textoPagina = raiz.innerText || '';
       const gerando = !!document.querySelector('[data-testid="stop-button"], button[aria-label*="Parar" i], button[aria-label*="Stop" i]')
         || /criando imagem|gerando imagem|creating image|generating image/i.test(textoPagina);
@@ -335,6 +347,46 @@ async function esperarEBaixar(page) {
 }
 
 // ---------- pós-processamento ----------
+// O "resultado" é a própria foto enviada? (o ChatGPT não gerou e a tela só mostrava o anexo)
+// Mesmas dimensões, ou quase idêntica em miniatura 48x48 cinza (a da IA é recomposta, muda bastante).
+async function pareceAOriginal(bruto, original) {
+  const [mb, mo] = await Promise.all([sharp(bruto).metadata(), sharp(original).rotate().metadata()]);
+  const larguraO = mo.autoOrient?.width ?? mo.width, alturaO = mo.autoOrient?.height ?? mo.height;
+  if (mb.width === larguraO && mb.height === alturaO) return true;
+  const mini = (b) => sharp(b).rotate().resize(48, 48, { fit: 'fill' }).grayscale().raw().toBuffer();
+  const [a, o] = await Promise.all([mini(bruto), mini(original)]);
+  let soma = 0;
+  for (let i = 0; i < a.length; i++) soma += Math.abs(a[i] - o[i]);
+  return soma / a.length < 8;
+}
+
+// Fotos já marcadas "ok" que na verdade são a original (gravadas antes desta checagem existir):
+// volta para a fila e, se já foi publicada, marca para publicar de novo por cima.
+async function revisarResultadosAntigos(estado, publicados, salvarEstado) {
+  const suspeitos = [];
+  for (const [nome, e] of Object.entries(estado)) {
+    if (e.status !== 'ok' || e.revisado) continue;
+    const arqIA = path.join(PASTA_ORIG, `${nome}_ia.png`), arqAntes = path.join(PASTA_ORIG, `${nome}_antes.png`);
+    if (!fs.existsSync(arqIA) || !fs.existsSync(arqAntes)) continue;
+    if (await pareceAOriginal(fs.readFileSync(arqIA), fs.readFileSync(arqAntes)).catch(() => false)) {
+      estado[nome] = { origem: e.origem, status: 'erro', tentativas: 0, erro: 'IA devolveu a foto original; refazer', data: new Date().toISOString() };
+      suspeitos.push(nome);
+    } else {
+      e.revisado = true;
+    }
+  }
+  salvarEstado();
+  if (suspeitos.length) {
+    const arqPub = path.join(SAIDA, 'publicados.json');
+    const pubs = JSON.parse(fs.readFileSync(arqPub, 'utf8') || '{}');
+    for (const nome of suspeitos) if (pubs[nome]) pubs[nome].refazer = true;
+    fs.writeFileSync(arqPub + '.tmp', JSON.stringify(pubs, null, 1));
+    fs.renameSync(arqPub + '.tmp', arqPub);
+    Object.assign(publicados, pubs);
+    console.log(`   ${suspeitos.length} foto(s) antiga(s) eram a original, voltaram para a fila: ${suspeitos.join(', ')}`);
+  }
+  return suspeitos;
+}
 async function cortarParaCard(bruto) {
   const meta = await sharp(bruto).metadata();
   const largura = Math.min(LARGURA_CARD, meta.width, Math.round(meta.height * PROPORCAO_CARD));
@@ -457,6 +509,14 @@ function pegarUrgente() {
       fs.renameSync(ARQ_ESTADO + '.tmp', ARQ_ESTADO);
     };
 
+    // fotos "ok" antigas que eram a original voltam para a frente da fila
+    if (SITE) {
+      const refazer = await revisarResultadosAntigos(estado, publicados, salvarEstado);
+      const urls = new Map(alvos.map(u => [(u.match(/\/imovel\/(\d+)\//) || [])[1], u]));
+      const daFrente = refazer.map(c => urls.get(c)).filter(Boolean);
+      alvos = [...daFrente, ...alvos.filter(u => !daFrente.includes(u))];
+    }
+
     console.log(`${alvos.length} na fila, ${PARALELO} aba(s) ao mesmo tempo${MAX ? `, no máximo ${MAX} nesta rodada` : ''}.\n`);
     let ok = 0, feitas = 0, puladas = 0, proximo = 0, parar = false;
     const falhas = [];
@@ -468,7 +528,7 @@ function pegarUrgente() {
         nome = foto.nome;
         const destino = path.join(SAIDA, `${nome}_card-ia.jpg`);
         // já publicado no Jetimob: a capa do site agora é a própria foto da IA, não reprocessar
-        if (!forcar && publicados[nome]) { puladas++; return false; }
+        if (!forcar && publicados[nome] && !publicados[nome].refazer) { puladas++; return false; }
         const anterior = estado[nome];
         const mesmaFoto = anterior?.origem === foto.origem;
         if (!forcar && mesmaFoto && anterior.status === 'ok' && fs.existsSync(destino)) { puladas++; return false; }
@@ -506,6 +566,7 @@ function pegarUrgente() {
         let bruto;
         try {
           bruto = await editarNoChatGPT(aba, arqEntrada);
+          if (await pareceAOriginal(bruto, original)) throw new Error('o ChatGPT não gerou imagem nova (veio a própria foto original)');
         } catch (e) {
           estado[nome] = { origem, status: 'erro', tentativas: (mesmaFoto ? anterior.tentativas || 0 : 0) + 1, erro: e.message.slice(0, 300), data: new Date().toISOString() };
           salvarEstado();
@@ -526,8 +587,9 @@ function pegarUrgente() {
         console.log(`✗ ${nome} ERRO: ${e.message}`);
         falhas.push(nome);
         if (e.limite && !parar) { parar = true; console.log('\nLimite do ChatGPT atingido. Rode de novo mais tarde que ele continua de onde parou.'); }
-        // sessão caiu no meio da rodada: não adianta seguir
-        else if (!parar && !(await logado(aba).catch(() => false))) { parar = true; console.log('\nSessão do ChatGPT caiu. Parando.'); }
+        // sessão caiu no meio da rodada: não adianta seguir (confere com calma antes: um erro
+        // qualquer no meio de um chat não quer dizer que o login caiu)
+        else if (!parar && !(await loginConfirmado(aba))) { parar = true; console.log('\nSessão do ChatGPT caiu. Parando.'); }
       }
       return true;
     }

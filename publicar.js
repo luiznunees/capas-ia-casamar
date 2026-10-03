@@ -71,6 +71,14 @@ async function abrirEdicao(page, codigo) {
   const url = `${PAINEL}/imoveis/${codigo}/editar`;
   await page.goto(url, { waitUntil: 'domcontentloaded' });
   await page.waitForLoadState('networkidle').catch(() => {});
+  // O Jetimob aceita uma sessão por conta: se a conta foi usada em outro lugar, aparece
+  // "Seu login foi revogado..." com o botão Continuar (retoma a sessão aqui).
+  const revogado = page.getByText(/login foi revogado/i).first();
+  if (await revogado.isVisible().catch(() => false)) {
+    console.log('   o Jetimob tinha derrubado esta sessão (a conta foi usada em outro lugar); retomando...');
+    await page.getByRole('button', { name: /continuar/i }).first().click({ timeout: 10000 }).catch(() => {});
+    await page.waitForLoadState('networkidle').catch(() => {});
+  }
   if (/login/i.test(await page.title()) || await page.locator('input[type=password]').count()) {
     if (!process.env.JET_EMAIL || !process.env.JET_SENHA) throw new Error('Sessão do Jetimob expirou e faltam JET_EMAIL/JET_SENHA no .env');
     console.log('   entrando no Jetimob...');
@@ -110,25 +118,21 @@ async function publicarUm(page, codigo, arquivo, urlAnterior = null) {
   if (n !== antes.length + 1) throw new Error(`esperava ${antes.length + 1} fotos na grade, tem ${n}`);
   await espera(1500);
 
-  // 2. arrasta a nova (última) para o 1º lugar = capa
-  await caixas.nth(n - 1).locator('.img-preview').dragTo(caixas.nth(0).locator('.img-preview'));
-  await espera(1000);
-  const depois = await idsDaGrade(page);
-  const capaNova = !antes.includes(depois[0]) && await caixas.nth(0).locator('.cover-image').count() > 0;
-  if (!capaNova || depois.slice(1).join('|') !== antes.join('|')) throw new Error('a ordem das fotos não ficou como esperado; nada foi salvo');
-
-  // 3. Salvar — confere o JSON antes de deixar sair (e tira a foto de IA anterior, se houver)
+  // 2. Salvar. A ordem das fotos é a ordem da lista "images" do JSON: em vez de arrastar na tela
+  // (falha com muitas fotos, a grade passa do tamanho da janela), a nova vai para o 1º lugar na lista.
+  // Confere antes: as de antes, na mesma ordem, mais uma nova. Tira a foto de IA anterior, se houver.
   const trocar = urlAnterior && antes.includes(urlAnterior) ? urlAnterior : null;
   const ficam = antes.filter(u => u !== trocar);
   let conferido = null;
   await page.route('**/api/imoveis/*/editar', async (route) => {
     const corpo = JSON.parse(route.request().postData() || '{}');
-    const urls = (corpo.images || []).map(i => i.url);
-    const ok = urls.length === antes.length + 1 && !antes.includes(urls[0]) && urls.slice(1).join('|') === antes.join('|');
-    conferido = { ok, total: urls.length, trocou: !!trocar };
+    const imagens = corpo.images || [];
+    const novas = imagens.filter(i => !antes.includes(i.url));
+    const velhas = imagens.filter(i => antes.includes(i.url));
+    const ok = imagens.length === antes.length + 1 && novas.length === 1 && velhas.map(i => i.url).join('|') === antes.join('|');
+    conferido = { ok, total: imagens.length, trocou: !!trocar };
     if (TESTE || !ok) return route.abort();
-    if (!trocar) return route.continue();
-    corpo.images = corpo.images.filter(i => i.url !== trocar);
+    corpo.images = [novas[0], ...velhas.filter(i => i.url !== trocar)];
     return route.continue({ postData: JSON.stringify(corpo) });
   });
   const resposta = TESTE ? null : page.waitForResponse(r => /\/api\/imoveis\/[^/]+\/editar/.test(r.url()) && r.request().method() === 'POST', { timeout: 60000 });
@@ -226,7 +230,7 @@ function pegarTrava() {
   const salvarPublicados = () => fs.writeFileSync(ARQ_PUBLICADOS, JSON.stringify(publicados, null, 1));
 
   let fila = TODOS
-    ? Object.keys(estado).filter(c => estado[c].status === 'ok' && !publicados[c] && !rejeitados.has(c))
+    ? Object.keys(estado).filter(c => estado[c].status === 'ok' && (!publicados[c] || (publicados[c].refazer && estado[c].data > publicados[c].data)) && !rejeitados.has(c))
     : CODIGOS;
   fila = fila.filter(c => /^\d+$/.test(c));   // só códigos de imóvel (fotos avulsas não têm onde publicar)
   if (MAX) fila = fila.slice(0, MAX);
@@ -247,9 +251,16 @@ function pegarTrava() {
     if (fila.length) {
       const ctx = await chromium.launchPersistentContext(PERFIL, { channel: 'chrome', headless: !VER, viewport: { width: 1440, height: 900 }, args: argsChrome() });
       const page = ctx.pages()[0] || await ctx.newPage();
+      // "Sair sem salvar?" ao ir para o próximo imóvel depois de uma falha: aceitar (o padrão é ficar
+      // na página, e aí todos os imóveis seguintes falhavam em cascata)
+      page.on('dialog', d => d.accept().catch(() => {}));
       if (TESTE) {
-        // ensaio: nenhum POST/PUT/PATCH/DELETE sai para o Jetimob
-        await page.route('**/*', r => (r.request().method() !== 'GET' && r.request().url().includes('jetimob.com')) ? r.abort() : r.continue());
+        // ensaio: bloqueia o que grava no imóvel (envio de foto e salvar); o login passa
+        await page.route('**/*', r => {
+          const q = r.request();
+          const grava = q.method() !== 'GET' && /app\.jetimob\.com\/api\/(upload-image|imoveis\/)/.test(q.url());
+          return grava ? r.abort() : r.continue();
+        });
       }
       try {
         for (const [i, codigo] of fila.entries()) {
