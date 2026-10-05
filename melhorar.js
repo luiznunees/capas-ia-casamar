@@ -16,6 +16,7 @@
  *   node melhorar.js <url-da-imagem|arquivo>
  *   node melhorar.js --login                -> só abre o Chrome para entrar na conta
  *   node melhorar.js --limpar               -> apaga chats antigos criados por estes scripts
+ *   node melhorar.js --limpar-biblioteca    -> apaga da Biblioteca do ChatGPT as fotos da automação (libera espaço)
  *
  *   --forcar        refaz mesmo se já existir em saida/
  *   --max=N         no máximo N fotos nesta rodada (padrão: sem limite)
@@ -54,6 +55,7 @@ const valor = (nome) => (args.find(a => a.startsWith(`--${nome}=`)) || '').split
 const ALVOS = args.filter(a => !a.startsWith('--'));
 const SO_LOGIN = flag('login');
 const LIMPAR = flag('limpar');
+const LIMPAR_BIBLIOTECA = flag('limpar-biblioteca');
 const SITE = flag('site');
 const FORCAR = flag('forcar');
 const MAX = +(valor('max') || 0);              // 0 = sem limite
@@ -198,6 +200,67 @@ async function apagarChat(page, id) {
 
 function idDoChat(page) {
   return (page.url().match(/\/c\/([0-9a-f-]{36})/) || [])[1] || null;
+}
+
+// ---------- Biblioteca do ChatGPT ----------
+// Apagar o chat não apaga os arquivos: a foto enviada e a gerada ficam na Biblioteca e enchem o
+// armazenamento da conta (4 GB no plano Go). Aqui saem, de forma definitiva, só os da automação:
+// os enviados "<código>_antes.png" e os gerados nas mesmas conversas. Arquivos da equipe (que usa
+// a mesma conta) nunca batem com isso. Pula os dos últimos 15 min, que uma aba pode estar usando.
+async function limparBiblioteca(page) {
+  return page.evaluate(async () => {
+    const s = await fetch('/api/auth/session', { credentials: 'include' }).then(r => r.json());
+    if (!s.accessToken) throw new Error('sem sessão do ChatGPT');
+    const H = { Authorization: `Bearer ${s.accessToken}`, 'Content-Type': 'application/json' };
+    const listar = async (lixeira) => {
+      const itens = [];
+      let cursor = null;
+      for (let i = 0; i < 200; i++) {
+        const j = await fetch('/backend-api/files/library', {
+          method: 'POST', headers: H,
+          body: JSON.stringify({ cursor, limit: 100, categories: [], source: null, include_hidden_files: true, include_saved_entities: true, include_sites: false, trashed_only: lixeira }),
+        }).then(r => r.json());
+        itens.push(...(j.items || []));
+        if (!j.cursor) break;
+        cursor = j.cursor;
+      }
+      return itens;
+    };
+    const [ativos, lixeira] = [await listar(false), await listar(true)];
+    const todos = [...ativos, ...lixeira];
+    // <código>_antes.png; o ChatGPT acrescenta (1) ou (data) quando o nome repete; "imovel_antes" veio do bug
+    // dos códigos com letras (MI02426), quando o nome ficava "imovel"
+    const ehEnviadoNosso = (i) => /^([A-Za-z]{0,4}\d+|imovel)_antes(\([^)]*\))?\.png$/.test(i.file_name || '');
+    const conversasNossas = new Set(todos.filter(ehEnviadoNosso).map(i => i.origination_thread_id).filter(Boolean));
+    const limite = Date.now() - 15 * 60 * 1000;
+    const alvos = todos.filter(i => (ehEnviadoNosso(i) || conversasNossas.has(i.origination_thread_id))
+      && Date.parse(i.record_creation_time || i.updated_at || 0) < limite);
+
+    let apagados = 0, bytes = 0, falhas = 0;
+    for (let k = 0; k < alvos.length; k += 5) {
+      await Promise.all(alvos.slice(k, k + 5).map(async (i) => {
+        const q = new URLSearchParams({ file_id: i.file_id, parent_directory_id: i.directory_id, file_name: i.file_name, soft_delete: 'false' });
+        const r = await fetch(`/backend-api/files/library/files/${i.id}?${q}`, { method: 'DELETE', headers: H }).catch(() => null);
+        if (r && r.ok) { apagados++; bytes += i.file_size_bytes || 0; } else falhas++;
+      }));
+    }
+    const uso = await fetch('/backend-api/files/library/storage/usage', { headers: H }).then(r => r.json()).catch(() => ({}));
+    return { apagados, falhas, mb: Math.round(bytes / 1048576), usadoPct: uso.allowed_bytes ? Math.round(uso.used_bytes / uso.allowed_bytes * 100) : null };
+  });
+}
+
+let limpandoBiblioteca = false;
+async function limparBibliotecaComAviso(page) {
+  if (limpandoBiblioteca) return;
+  limpandoBiblioteca = true;
+  try {
+    const r = await limparBiblioteca(page);
+    console.log(`   Biblioteca do ChatGPT: ${r.apagados} arquivo(s) da automação apagado(s) (${r.mb} MB)${r.falhas ? `, ${r.falhas} falha(s)` : ''}; armazenamento em ${r.usadoPct ?? '?'}%`);
+  } catch (e) {
+    console.log(`   (aviso: não consegui limpar a Biblioteca do ChatGPT: ${e.message.split('\n')[0]})`);
+  } finally {
+    limpandoBiblioteca = false;
+  }
 }
 
 async function limparChatsAntigos(page) {
@@ -444,7 +507,7 @@ async function filaDoSite() {
   const fila = [];
   const vistos = new Set();
   const adicionar = (u) => { if (!vistos.has(u)) { vistos.add(u); fila.push(u); } };
-  const codigoDe = (u) => (u.match(/\/imovel\/(\d+)\//) || [])[1];
+  const codigoDe = (u) => (u.match(/\/imovel\/([A-Za-z]{0,4}\d+)\//) || [])[1];
   const cidades = new Map((await condominiosDoSite().catch(() => [])).map(c => [c.slug, c.cidade]));
   const porCondominio = {};
   for (const slug of lerConfig().prioridades) {
@@ -483,7 +546,7 @@ function pegarUrgente() {
 // ---------- principal ----------
 (async () => {
   fs.mkdirSync(PASTA_ORIG, { recursive: true });
-  const soNavegador = SO_LOGIN || LIMPAR || EXPORTAR || IMPORTAR;
+  const soNavegador = SO_LOGIN || LIMPAR || LIMPAR_BIBLIOTECA || EXPORTAR || IMPORTAR;
   if (!soNavegador) {
     if (!pegarTrava()) { console.log('Já tem uma rodada em andamento. Saindo.'); return; }
     process.on('exit', soltarTrava);
@@ -525,6 +588,7 @@ function pegarUrgente() {
     }
     if (IMPORTAR || SO_LOGIN) { console.log('Login pronto.'); return; }
     if (LIMPAR) { await limparChatsAntigos(page); return; }
+    if (LIMPAR_BIBLIOTECA) { await limparBibliotecaComAviso(page); return; }
 
     const estado = lerJson(ARQ_ESTADO, {});
     const publicados = lerJson(path.join(SAIDA, 'publicados.json'), {});
@@ -536,8 +600,10 @@ function pegarUrgente() {
 
     // fotos "ok" antigas que eram a original voltam para a frente da fila
     if (SITE) {
+      delete estado.imovel;   // resto do bug dos códigos com letras: vários imóveis gravavam com esse nome
+      await limparBibliotecaComAviso(page);   // o espaço da conta enche; começa liberando
       const refazer = await revisarResultadosAntigos(estado, publicados, salvarEstado);
-      const urls = new Map(alvos.map(u => [(u.match(/\/imovel\/(\d+)\//) || [])[1], u]));
+      const urls = new Map(alvos.map(u => [(u.match(/\/imovel\/([A-Za-z]{0,4}\d+)\//) || [])[1], u]));
       const daFrente = refazer.map(c => urls.get(c)).filter(Boolean);
       alvos = [...daFrente, ...alvos.filter(u => !daFrente.includes(u))];
     }
@@ -608,6 +674,7 @@ function pegarUrgente() {
         const m = await sharp(card).metadata();
         ok++;
         console.log(`✓ [${n}] ${nome} ok (${Math.round((Date.now() - t0) / 1000)}s) -> ${m.width}x${m.height}`);
+        if (ok % 25 === 0) await limparBibliotecaComAviso(aba);   // aba livre agora, entre uma foto e outra
       } catch (e) {
         console.log(`✗ ${nome} ERRO: ${e.message.split('\n')[0]}`);
         await guardarPrint(aba, `ia-${nome}`);
@@ -644,6 +711,7 @@ function pegarUrgente() {
         if (usouChatGPT && !parar && proximo < alvos.length) await espera((PAUSA + Math.random() * PAUSA * 0.6) * 1000);
       }
     }));
+    if (ok) await limparBibliotecaComAviso(page);
     if (MAX && feitas >= MAX && proximo < alvos.length) console.log(`\nLimite de ${MAX} por rodada. Rode de novo para continuar.`);
     console.log(`\n[${new Date().toLocaleString('pt-BR')}] Pronto: ${ok} ok, ${falhas.length} falha(s), ${puladas} já feitas/puladas. Confira os *_comparar.jpg antes de publicar.`);
     if (falhas.length) process.exitCode = 1;

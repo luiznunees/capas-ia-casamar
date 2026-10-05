@@ -237,7 +237,7 @@ function pegarTrava() {
   let fila = TODOS
     ? Object.keys(estado).filter(c => estado[c].status === 'ok' && (!publicados[c] || (publicados[c].refazer && estado[c].data > publicados[c].data)) && !rejeitados.has(c))
     : CODIGOS;
-  fila = fila.filter(c => /^\d+$/.test(c));   // só códigos de imóvel (fotos avulsas não têm onde publicar)
+  fila = fila.filter(c => /^[A-Z]{0,4}\d+$/.test(c));   // só códigos de imóvel (fotos avulsas não têm onde publicar)
   if (MAX) fila = fila.slice(0, MAX);
   // publicados no Jetimob cujo site ainda não confirmou (rodada anterior caiu ou o site recusou)
   const siteAtrasado = TODOS && !TESTE ? Object.keys(publicados).filter(c => !publicados[c].site) : [];

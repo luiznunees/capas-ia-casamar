@@ -206,7 +206,7 @@ function recentes() {
   const estado = lerJson(ARQ_ESTADO, {});
   const publicados = lerJson(ARQ_PUBLICADOS, {});
   return Object.entries(estado)
-    .filter(([c, e]) => /^\d+$/.test(c) && e.status === 'ok')
+    .filter(([c, e]) => /^[A-Z]{0,4}\d+$/.test(c) && e.status === 'ok')
     .sort((a, b) => (b[1].data > a[1].data ? 1 : -1))
     .slice(0, 24)
     .map(([c, e]) => ({ codigo: c, data: e.data, publicado: !!publicados[c], card: `/img/card/${c}?v=${versao(path.join(SAIDA, `${c}_card-ia.jpg`))}` }));
@@ -401,7 +401,7 @@ const servidor = http.createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/') {
       return responder(res, 200, fs.readFileSync(path.join(__dirname, 'painel.html')), 'text/html; charset=utf-8');
     }
-    if (req.method === 'GET' && partes[0] === 'img' && /^\d{1,9}$/.test(partes[2] || '')) {
+    if (req.method === 'GET' && partes[0] === 'img' && /^[A-Z]{0,4}\d{1,9}$/.test(partes[2] || '')) {
       const arq = partes[1] === 'card' ? path.join(SAIDA, `${partes[2]}_card-ia.jpg`)
         : partes[1] === 'antes' ? path.join(PASTA_ORIG, `${partes[2]}_antes.png`) : null;
       if (!arq || !fs.existsSync(arq)) return responder(res, 404, { erro: 'sem imagem' });
@@ -450,7 +450,7 @@ const servidor = http.createServer(async (req, res) => {
       if (req.method === 'GET') return responder(res, 200, lerLista(ARQ_URGENTE));
       if (req.method === 'POST') {
         const { codigos = [] } = JSON.parse(await lerCorpo(req, 100 * 1024));
-        const validos = [...new Set(codigos.map(String).map(c => c.trim()).filter(c => /^\d{1,9}$/.test(c)))].slice(0, 200);
+        const validos = [...new Set(codigos.map(String).map(c => c.trim().toUpperCase()).filter(c => /^[A-Z]{0,4}\d{1,9}$/.test(c)))].slice(0, 200);
         const achados = [], naoAchados = [];
         for (const c of validos) {
           const site = await dadosDoSite(c).catch(() => ({}));
@@ -483,7 +483,7 @@ const servidor = http.createServer(async (req, res) => {
 
     // Sincroniza um imóvel trabalhado em outra máquina: registro de publicação, estado e fotos (base64).
     // Corpo: { estado?, publicado?, antes?, card? }
-    if (req.method === 'POST' && partes[0] === 'api' && partes[1] === 'sincronizar' && /^\d{1,9}$/.test(partes[2] || '')) {
+    if (req.method === 'POST' && partes[0] === 'api' && partes[1] === 'sincronizar' && /^[A-Z]{0,4}\d{1,9}$/.test(partes[2] || '')) {
       const codigo = partes[2];
       const corpo = JSON.parse(await lerCorpo(req, 30 * 1024 * 1024));
       fs.mkdirSync(PASTA_ORIG, { recursive: true });
@@ -524,8 +524,8 @@ const servidor = http.createServer(async (req, res) => {
     }
 
     if (partes[0] === 'api' && partes[1] === 'imovel') {
-      const codigo = partes[2] || '';
-      if (!/^\d{1,9}$/.test(codigo)) return responder(res, 400, { erro: 'Código inválido: use só números.' });
+      const codigo = (partes[2] || '').toUpperCase();
+      if (!/^[A-Z]{0,4}\d{1,9}$/.test(codigo)) return responder(res, 400, { erro: 'Código inválido (ex.: 16504 ou MI02426).' });
       const acao = partes[3];
       if (req.method === 'GET' && !acao) return responder(res, 200, await status(codigo));
       if (req.method === 'POST') {

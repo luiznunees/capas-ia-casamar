@@ -9,7 +9,7 @@ const dia = (iso) => new Date(iso).toLocaleDateString('sv-SE');   // AAAA-MM-DD 
 
 function rejeitados() {
   const arq = path.join(DADOS, 'rejeitados.txt');
-  return fs.existsSync(arq) ? fs.readFileSync(arq, 'utf8').split(/\r?\n/).map(l => l.trim()).filter(l => /^\d+$/.test(l)) : [];
+  return fs.existsSync(arq) ? fs.readFileSync(arq, 'utf8').split(/\r?\n/).map(l => l.trim()).filter(l => /^[A-Z]{0,4}\d+$/.test(l)) : [];
 }
 
 // desde (ISO, opcional): conta também o que aconteceu a partir dali (ex.: início da madrugada)
@@ -17,7 +17,7 @@ function resumo({ desde } = {}) {
   const estado = lerJson(path.join(SAIDA, 'estado.json'), {});
   const publicados = lerJson(path.join(SAIDA, 'publicados.json'), {});
   const fila = lerJson(path.join(SAIDA, 'fila.json'), null);
-  const imoveis = Object.entries(estado).filter(([c]) => /^\d+$/.test(c));
+  const imoveis = Object.entries(estado).filter(([c]) => /^[A-Z]{0,4}\d+$/.test(c));
   const pubs = Object.entries(publicados);
 
   const geradas = imoveis.filter(([, e]) => e.status === 'ok').length;

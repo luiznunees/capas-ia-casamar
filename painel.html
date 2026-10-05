@@ -499,8 +499,8 @@ async function carregarVisao() {
 // ================= IMÓVEL =================
 let atual = null, timer = null;
 async function buscar(codigo, { silencioso = false } = {}) {
-  codigo = String(codigo).trim();
-  if (!/^\d{1,9}$/.test(codigo)) return mostrarErro('Digite só o número do código.');
+  codigo = String(codigo).trim().toUpperCase();
+  if (!/^[A-Z]{0,4}\d{1,9}$/.test(codigo)) return mostrarErro('Digite o código do imóvel (ex.: 16504 ou MI02426).');
   if (!silencioso) { mostrarErro(''); $('#resultado').innerHTML = '<div class="cartao">Consultando o imóvel…</div>'; }
   try {
     atual = await api(`/api/imovel/${codigo}`);
@@ -639,7 +639,7 @@ $('#salvarAuto').onclick = async () => {
 };
 async function carregarUrgente() {
   const l = await api('/api/fila/urgente');
-  $('#filaUrgente').textContent = l.length ? `Na frente da fila (${l.length}): ${l.map(u => (u.match(/imovel\/(\d+)/) || [])[1]).join(', ')}` : 'Nenhum imóvel furando a fila.';
+  $('#filaUrgente').textContent = l.length ? `Na frente da fila (${l.length}): ${l.map(u => (u.match(/imovel\/([A-Za-z]{0,4}\d+)/) || [])[1]).join(', ')}` : 'Nenhum imóvel furando a fila.';
 }
 $('#btnFurar').onclick = async () => {
   const codigos = $('#furar').value.split(/[\s,;]+/).filter(Boolean);

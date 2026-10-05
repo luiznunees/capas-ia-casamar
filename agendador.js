@@ -146,7 +146,7 @@ function temOQuePublicar() {
   const publicados = lerJson(path.join(SAIDA, 'publicados.json'), {});
   const arqRej = path.join(DADOS, 'rejeitados.txt');
   const rejeitados = new Set(fs.existsSync(arqRej) ? fs.readFileSync(arqRej, 'utf8').split(/\r?\n/).map(l => l.trim()) : []);
-  return Object.entries(estado).some(([c, e]) => /^\d+$/.test(c) && e.status === 'ok' && (!publicados[c] || (publicados[c].refazer && e.data > publicados[c].data)) && !rejeitados.has(c))
+  return Object.entries(estado).some(([c, e]) => /^[A-Z]{0,4}\d+$/.test(c) && e.status === 'ok' && (!publicados[c] || (publicados[c].refazer && e.data > publicados[c].data)) && !rejeitados.has(c))
     || Object.values(publicados).some(p => !p.site);
 }
 

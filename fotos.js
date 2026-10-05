@@ -23,7 +23,7 @@ async function fotoCapaDoImovel(urlPagina) {
   const html = await (await baixar(urlPagina)).text();
   const m = html.match(/<a href="(https:\/\/s01\.jetimgs\.com\/[^"]+)"[^>]*data-fancybox="fotos"/);
   if (!m) throw new Error(`Foto 1 não encontrada em ${urlPagina}`);
-  const codigo = (urlPagina.match(/\/imovel\/(\d+)\//) || [])[1] || 'imovel';
+  const codigo = (urlPagina.match(/\/imovel\/([A-Za-z]{0,4}\d+)\//) || [])[1] || 'imovel';
   return { url: m[1], nome: codigo };
 }
 
