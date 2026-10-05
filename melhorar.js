@@ -207,46 +207,73 @@ function idDoChat(page) {
 // armazenamento da conta (4 GB no plano Go). Aqui saem, de forma definitiva, só os da automação:
 // os enviados "<código>_antes.png" e os gerados nas mesmas conversas. Arquivos da equipe (que usa
 // a mesma conta) nunca batem com isso. Pula os dos últimos 15 min, que uma aba pode estar usando.
-async function limparBiblioteca(page) {
-  return page.evaluate(async () => {
+// Chamadas à API da Biblioteca pela página (usa a sessão logada). Uma por page.evaluate, para a
+// aba não acumular tudo de uma vez (ela travava com centenas de exclusões numa chamada só).
+async function apiBiblioteca(page, acao, dados) {
+  return page.evaluate(async ({ acao, dados }) => {
     const s = await fetch('/api/auth/session', { credentials: 'include' }).then(r => r.json());
     if (!s.accessToken) throw new Error('sem sessão do ChatGPT');
     const H = { Authorization: `Bearer ${s.accessToken}`, 'Content-Type': 'application/json' };
-    const listar = async (lixeira) => {
-      const itens = [];
-      let cursor = null;
-      for (let i = 0; i < 200; i++) {
-        const j = await fetch('/backend-api/files/library', {
-          method: 'POST', headers: H,
-          body: JSON.stringify({ cursor, limit: 100, categories: [], source: null, include_hidden_files: true, include_saved_entities: true, include_sites: false, trashed_only: lixeira }),
-        }).then(r => r.json());
-        itens.push(...(j.items || []));
-        if (!j.cursor) break;
-        cursor = j.cursor;
-      }
-      return itens;
-    };
-    const [ativos, lixeira] = [await listar(false), await listar(true)];
-    const todos = [...ativos, ...lixeira];
-    // <código>_antes.png; o ChatGPT acrescenta (1) ou (data) quando o nome repete; "imovel_antes" veio do bug
-    // dos códigos com letras (MI02426), quando o nome ficava "imovel"
-    const ehEnviadoNosso = (i) => /^([A-Za-z]{0,4}\d+|imovel)_antes(\([^)]*\))?\.png$/.test(i.file_name || '');
-    const conversasNossas = new Set(todos.filter(ehEnviadoNosso).map(i => i.origination_thread_id).filter(Boolean));
-    const limite = Date.now() - 15 * 60 * 1000;
-    const alvos = todos.filter(i => (ehEnviadoNosso(i) || conversasNossas.has(i.origination_thread_id))
-      && Date.parse(i.record_creation_time || i.updated_at || 0) < limite);
-
-    let apagados = 0, bytes = 0, falhas = 0;
-    for (let k = 0; k < alvos.length; k += 5) {
-      await Promise.all(alvos.slice(k, k + 5).map(async (i) => {
-        const q = new URLSearchParams({ file_id: i.file_id, parent_directory_id: i.directory_id, file_name: i.file_name, soft_delete: 'false' });
-        const r = await fetch(`/backend-api/files/library/files/${i.id}?${q}`, { method: 'DELETE', headers: H }).catch(() => null);
-        if (r && r.ok) { apagados++; bytes += i.file_size_bytes || 0; } else falhas++;
-      }));
+    if (acao === 'listar') {
+      const j = await fetch('/backend-api/files/library', {
+        method: 'POST', headers: H,
+        body: JSON.stringify({ cursor: dados.cursor, limit: 100, categories: [], source: null, include_hidden_files: true, include_saved_entities: true, include_sites: false, trashed_only: dados.lixeira }),
+      }).then(r => r.json());
+      return {
+        cursor: j.cursor || null,
+        itens: (j.items || []).map(i => ({ id: i.id, file_id: i.file_id, dir: i.directory_id, nome: i.file_name, conversa: i.origination_thread_id, criado: i.record_creation_time || i.updated_at, bytes: i.file_size_bytes || 0 })),
+      };
     }
-    const uso = await fetch('/backend-api/files/library/storage/usage', { headers: H }).then(r => r.json()).catch(() => ({}));
-    return { apagados, falhas, mb: Math.round(bytes / 1048576), usadoPct: uso.allowed_bytes ? Math.round(uso.used_bytes / uso.allowed_bytes * 100) : null };
-  });
+    if (acao === 'apagar') {
+      let ok = 0, bytes = 0;
+      for (const i of dados.itens) {
+        const q = new URLSearchParams({ file_id: i.file_id, parent_directory_id: i.dir, file_name: i.nome, soft_delete: 'false' });
+        const r = await fetch(`/backend-api/files/library/files/${i.id}?${q}`, { method: 'DELETE', headers: H }).catch(() => null);
+        if (r && r.ok) { ok++; bytes += i.bytes; }
+      }
+      return { ok, bytes };
+    }
+    if (acao === 'uso') return fetch('/backend-api/files/library/storage/usage', { headers: H }).then(r => r.json());
+  }, { acao, dados });
+}
+
+async function limparBiblioteca(page) {
+  if (!page.url().startsWith('https://chatgpt.com')) await page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded' });
+  const listarTudo = async (lixeira) => {
+    const itens = [];
+    let cursor = null;
+    for (let i = 0; i < 200; i++) {
+      const r = await apiBiblioteca(page, 'listar', { cursor, lixeira });
+      itens.push(...r.itens);
+      if (!r.cursor) break;
+      cursor = r.cursor;
+    }
+    return itens;
+  };
+  const todos = [...await listarTudo(false), ...await listarTudo(true)];
+  // <código>_antes.png; o ChatGPT acrescenta (1) ou (data) quando o nome repete; "imovel_antes" veio do bug
+  // dos códigos com letras (MI02426), quando o nome ficava "imovel"
+  const ehEnviadoNosso = (i) => /^([A-Za-z]{0,4}\d+|imovel)_antes(\([^)]*\))?\.png$/.test(i.nome || '');
+  const conversasNossas = new Set(todos.filter(ehEnviadoNosso).map(i => i.conversa).filter(Boolean));
+  const limite = Date.now() - 15 * 60 * 1000;
+  const alvos = todos.filter(i => (ehEnviadoNosso(i) || conversasNossas.has(i.conversa)) && Date.parse(i.criado || 0) < limite);
+
+  let apagados = 0, bytes = 0, travou = 0;
+  for (let k = 0; k < alvos.length; k += 25) {
+    const lote = alvos.slice(k, k + 25);
+    try {
+      const r = await apiBiblioteca(page, 'apagar', { itens: lote });
+      apagados += r.ok;
+      bytes += r.bytes;
+    } catch (e) {
+      // aba travou ou recarregou no meio: abre de novo e segue com o próximo lote
+      if (++travou > 3) throw e;
+      await page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded' }).catch(() => {});
+      await espera(3000);
+    }
+  }
+  const uso = await apiBiblioteca(page, 'uso').catch(() => ({}));
+  return { apagados, falhas: alvos.length - apagados, mb: Math.round(bytes / 1048576), usadoPct: uso.allowed_bytes ? Math.round(uso.used_bytes / uso.allowed_bytes * 100) : null };
 }
 
 let limpandoBiblioteca = false;
