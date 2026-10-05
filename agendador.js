@@ -60,6 +60,13 @@ const SINAIS = [
     '',
     'Confira ```JET_EMAIL``` e ```JET_SENHA``` no Easypanel — a senha pode ter mudado.',
   ].join('\n')],
+  [/Sessão do Jetimob caindo/, 'login-jetimob', [
+    '⚠️ *O Jetimob está derrubando o login da automação*',
+    '_A publicação pausou por 30 min e tenta de novo depois._',
+    '',
+    'O Jetimob só aceita *um login por vez*: alguém deve estar usando a mesma conta da automação.',
+    'O ideal é um usuário só para a automação no Jetimob.',
+  ].join('\n')],
   [/Não consegui abrir o Chrome/, 'ia-falhou', [
     '⚠️ *O Chrome não abriu no servidor*',
     '_A IA não rodou._ Veja a aba *Logs* do painel.',

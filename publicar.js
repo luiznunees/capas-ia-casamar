@@ -59,6 +59,7 @@ const PERFIL = process.env.JETIMOB_PERFIL || path.join(__dirname, 'perfil-jetimo
 const ARQ_ESTADO = path.join(SAIDA, 'estado.json');
 const ARQ_PUBLICADOS = path.join(SAIDA, 'publicados.json');
 const ARQ_REJEITADOS = path.join(DADOS, 'rejeitados.txt');
+const ARQ_PAUSA = path.join(SAIDA, '.jetimob-pausa');   // sessão caindo: --todos espera antes de tentar de novo
 
 const espera = (ms) => new Promise(r => setTimeout(r, ms));
 const lerJson = (arq, padrao) => { try { return JSON.parse(fs.readFileSync(arq, 'utf8')); } catch { return padrao; } };
@@ -67,12 +68,10 @@ const lerLista = (arq) => fs.existsSync(arq)
   : [];
 
 // ---------- painel ----------
-async function abrirEdicao(page, codigo) {
-  const url = `${PAINEL}/imoveis/${codigo}/editar`;
-  await page.goto(url, { waitUntil: 'domcontentloaded' });
-  await page.waitForLoadState('networkidle').catch(() => {});
-  // O Jetimob aceita uma sessão por conta: se a conta foi usada em outro lugar, aparece
-  // "Seu login foi revogado..." com o botão Continuar (retoma a sessão aqui).
+// O Jetimob aceita uma sessão por conta. Quando a conta é usada em outro lugar, a nossa cai de dois
+// jeitos: aparece "Seu login foi revogado..." (botão Continuar retoma aqui) ou a página abre mas os
+// dados não vêm — o formulário do imóvel fica vazio. Nos dois casos, entra de novo.
+async function garantirSessao(page) {
   const revogado = page.getByText(/login foi revogado/i).first();
   if (await revogado.isVisible().catch(() => false)) {
     console.log('   o Jetimob tinha derrubado esta sessão (a conta foi usada em outro lugar); retomando...');
@@ -86,16 +85,48 @@ async function abrirEdicao(page, codigo) {
     await page.fill('input[type=password]', process.env.JET_SENHA);
     await page.click('button[type=submit]:has-text("Entrar")');
     await page.waitForURL(u => !/\/$|login/.test(u.pathname), { timeout: 30000 }).catch(() => {});
-    await page.goto(url, { waitUntil: 'domcontentloaded' });
     await page.waitForLoadState('networkidle').catch(() => {});
     if (await page.locator('input[type=password]').count()) throw new Error('Login no Jetimob falhou (confira JET_EMAIL/JET_SENHA)');
   }
-  if (!page.url().includes(`/imoveis/${codigo}/editar`)) throw new Error(`Imóvel ${codigo} não abriu no painel (${page.url()})`);
-  await page.locator('.images-grid').first().waitFor({ timeout: 30000 });
-  // as fotos chegam depois da grade: espera aparecerem (imóvel no site sempre tem ao menos a capa)
-  const fotos = page.locator('.images-grid').first().locator('.img-preview');
-  for (let i = 0; i < 40 && await fotos.count() === 0; i++) await espera(500);
-  if (await fotos.count() === 0) throw new Error('a grade de fotos do imóvel não carregou no Jetimob');
+}
+
+async function abrirEdicao(page, codigo) {
+  const url = `${PAINEL}/imoveis/${codigo}/editar`;
+  for (let tentativa = 1; tentativa <= 3; tentativa++) {
+    await page.goto(url, { waitUntil: 'domcontentloaded' });
+    await page.waitForLoadState('networkidle').catch(() => {});
+    await garantirSessao(page);
+    if (!page.url().includes(`/imoveis/${codigo}/editar`)) {
+      await page.goto(url, { waitUntil: 'domcontentloaded' });
+      await page.waitForLoadState('networkidle').catch(() => {});
+    }
+    if (!page.url().includes(`/imoveis/${codigo}/editar`)) throw new Error(`Imóvel ${codigo} não abriu no painel (${page.url()})`);
+
+    // o formulário precisa ter vindo com o imóvel certo (campo Código) e com as fotos
+    const campoCodigo = page.locator('input[placeholder="Informe o código"]').first();
+    let lido = '';
+    for (let i = 0; i < 40 && !lido; i++) {
+      lido = (await campoCodigo.inputValue({ timeout: 2000 }).catch(() => '')).trim();
+      if (!lido) await espera(500);
+    }
+    const fotos = page.locator('.images-grid').first().locator('.img-preview');
+    for (let i = 0; i < 40 && lido && await fotos.count() === 0; i++) await espera(500);
+    if (lido.toUpperCase() === String(codigo).toUpperCase() && await fotos.count() > 0) return;
+
+    console.log(`   formulário do ${codigo} veio ${lido ? 'sem fotos' : 'vazio'} (tentativa ${tentativa}); entrando de novo no Jetimob...`);
+    await page.goto(`${PAINEL}/dashboard`, { waitUntil: 'domcontentloaded' }).catch(() => {});
+    await page.waitForLoadState('networkidle').catch(() => {});
+    await garantirSessao(page);
+    if (tentativa === 2) {
+      // força um login novo: sai e entra
+      await page.context().clearCookies();
+      await page.goto(`${PAINEL}/`, { waitUntil: 'domcontentloaded' }).catch(() => {});
+      await garantirSessao(page);
+    }
+  }
+  const e = new Error('o formulário do imóvel veio vazio no Jetimob mesmo depois de entrar de novo (a conta pode estar em uso em outro lugar)');
+  e.sessao = true;
+  throw e;
 }
 
 // As caixas da grade têm como id a URL da foto (ou blob: enquanto a nova não subiu).
@@ -220,6 +251,14 @@ function pegarTrava() {
 (async () => {
   if (!TESTE && !SO_SITE && !pegarTrava()) { console.log('Já tem uma publicação em andamento. Saindo.'); return; }
 
+  if (TODOS && !TESTE) {
+    const pausa = lerJson(ARQ_PAUSA, null);
+    if (pausa && pausa.ate > Date.now()) {
+      console.log(`Publicação pausada até ${new Date(pausa.ate).toLocaleTimeString('pt-BR')} (sessão do Jetimob caindo).`);
+      return;
+    }
+  }
+
   if (SO_SITE) {
     for (const codigo of CODIGOS) {
       try { await atualizarNoSite(codigo, { esperarAntes: false }); console.log(`✓ site atualizado: ${codigo}`); }
@@ -291,6 +330,12 @@ function pegarTrava() {
             console.log(`✗ ${codigo} ERRO: ${e.message.split('\n')[0]}`);
             await guardarPrint(page, `jetimob-${codigo}`);
             falhas.push(codigo);
+            if (e.sessao && TODOS) {
+              // não adianta seguir: todos os próximos dariam o mesmo erro (e cada login derruba quem usa a conta)
+              fs.writeFileSync(ARQ_PAUSA, JSON.stringify({ ate: Date.now() + 30 * 60 * 1000, motivo: e.message }));
+              console.log('Sessão do Jetimob caindo: publicação pausada por 30 minutos.');
+              break;
+            }
           }
           if (i < fila.length - 1) await espera(PAUSA * 1000);
         }
