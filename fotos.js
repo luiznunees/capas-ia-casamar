@@ -156,6 +156,17 @@ function salvarConfig(parcial) {
   return lerConfig();
 }
 
+// Print da tela quando algo falha, em saida/debug/ (o painel mostra para o admin). Guarda os 60 mais novos.
+const PASTA_DEBUG = path.join(SAIDA, 'debug');
+async function guardarPrint(page, nome) {
+  try {
+    fs.mkdirSync(PASTA_DEBUG, { recursive: true });
+    await page.screenshot({ path: path.join(PASTA_DEBUG, `${nome.replace(/[^\w-]/g, '_')}.png`), timeout: 10000 });
+    const arqs = fs.readdirSync(PASTA_DEBUG).map(f => ({ f, t: fs.statSync(path.join(PASTA_DEBUG, f)).mtimeMs })).sort((a, b) => b.t - a.t);
+    for (const { f } of arqs.slice(60)) fs.unlinkSync(path.join(PASTA_DEBUG, f));
+  } catch {}
+}
+
 // Sessão do ChatGPT exportada no Windows (melhorar.js --exportar-sessao), enviada pelo painel.
 // "Pendente" = arquivo mais novo que a última importação; o agendador importa antes da próxima rodada.
 const ARQ_SESSAO = path.join(DADOS, 'sessao-chatgpt.json');
@@ -168,4 +179,4 @@ const sessao = {
   datas: () => ({ enviada: mtime(ARQ_SESSAO) || null, importada: mtime(MARCA_SESSAO) || null }),
 };
 
-module.exports = { DADOS, ENTRADA, SAIDA, argsChrome, sessao, lerConfig, salvarConfig, condominiosDoSite, baixar, resolver, carregar, alvosOuEntrada, imoveisDoSite, imoveisDoCondominio, urlDoImovel };
+module.exports = { DADOS, ENTRADA, SAIDA, PASTA_DEBUG, guardarPrint, argsChrome, sessao, lerConfig, salvarConfig, condominiosDoSite, baixar, resolver, carregar, alvosOuEntrada, imoveisDoSite, imoveisDoCondominio, urlDoImovel };

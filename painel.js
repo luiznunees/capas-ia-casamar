@@ -21,7 +21,7 @@ const path = require('path');
 const http = require('http');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
-const { DADOS, SAIDA, sessao, lerConfig, salvarConfig, condominiosDoSite, resolver, urlDoImovel } = require('./fotos');
+const { DADOS, SAIDA, PASTA_DEBUG, sessao, lerConfig, salvarConfig, condominiosDoSite, resolver, urlDoImovel } = require('./fotos');
 const { resumo } = require('./resumo');
 const { enviarTexto, configurado } = require('./alertas');
 
@@ -212,6 +212,21 @@ function recentes() {
     .map(([c, e]) => ({ codigo: c, data: e.data, publicado: !!publicados[c], card: `/img/card/${c}?v=${versao(path.join(SAIDA, `${c}_card-ia.jpg`))}` }));
 }
 
+function printsDeErro() {
+  const lista = [];
+  const juntar = (pasta, filtro) => {
+    if (!fs.existsSync(pasta)) return;
+    for (const f of fs.readdirSync(pasta)) {
+      if (!filtro.test(f)) continue;
+      const caminho = path.join(pasta, f);
+      lista.push({ arquivo: f, caminho, data: new Date(fs.statSync(caminho).mtimeMs).toISOString() });
+    }
+  };
+  juntar(PASTA_DEBUG, /\.png$/);
+  juntar(SAIDA, /(_erro-jetimob|^debug-ultimo-erro)\.png$/);
+  return lista.sort((a, b) => (b.data > a.data ? 1 : -1)).slice(0, 80);
+}
+
 function alternarRejeitado(codigo) {
   const linhas = fs.existsSync(ARQ_REJEITADOS) ? fs.readFileSync(ARQ_REJEITADOS, 'utf8').replace(/\s+$/, '').split(/\r?\n/) : [];
   const tem = linhas.some(l => l.trim() === codigo);
@@ -280,7 +295,7 @@ function quemE(req) {
 }
 
 // Leitura: só GET e só o que é para ver. Config, sessão do ChatGPT, fila, acessos e alertas ficam de fora.
-const SO_ADMIN = ['/api/config', '/api/sessao', '/api/fila', '/api/acessos', '/api/alertas', '/api/sincronizar'];
+const SO_ADMIN = ['/api/config', '/api/sessao', '/api/fila', '/api/acessos', '/api/alertas', '/api/sincronizar', '/api/debug', '/img/debug'];
 function permitido(quem, req, url) {
   if (quem.papel === 'admin') return true;
   if (req.method !== 'GET') return false;
@@ -394,6 +409,15 @@ const servidor = http.createServer(async (req, res) => {
       return fs.createReadStream(arq).pipe(res);
     }
     if (req.method === 'GET' && url.pathname === '/api/recentes') return responder(res, 200, recentes());
+
+    // Prints de tela salvos quando algo falha (só admin): saida/debug/ e os antigos *_erro-jetimob.png
+    if (req.method === 'GET' && url.pathname === '/api/debug') return responder(res, 200, printsDeErro().map(({ arquivo, data }) => ({ arquivo, data })));
+    if (req.method === 'GET' && partes[0] === 'img' && partes[1] === 'debug' && /^[\w.-]+\.png$/.test(partes[2] || '')) {
+      const arq = printsDeErro().find(p => p.arquivo === partes[2]);
+      if (!arq) return responder(res, 404, { erro: 'sem imagem' });
+      res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'no-store' });
+      return fs.createReadStream(arq.caminho).pipe(res);
+    }
 
     // ---------- admin: visão geral, controles, alertas ----------
     if (req.method === 'GET' && url.pathname === '/api/resumo') {

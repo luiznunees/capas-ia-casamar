@@ -28,7 +28,7 @@
 const fs = require('fs');
 const path = require('path');
 const { chromium, request } = require('playwright');
-const { DADOS, SAIDA, argsChrome } = require('./fotos');
+const { DADOS, SAIDA, guardarPrint, argsChrome } = require('./fotos');
 
 // ---------- argumentos e config ----------
 const args = process.argv.slice(2);
@@ -92,6 +92,10 @@ async function abrirEdicao(page, codigo) {
   }
   if (!page.url().includes(`/imoveis/${codigo}/editar`)) throw new Error(`Imóvel ${codigo} não abriu no painel (${page.url()})`);
   await page.locator('.images-grid').first().waitFor({ timeout: 30000 });
+  // as fotos chegam depois da grade: espera aparecerem (imóvel no site sempre tem ao menos a capa)
+  const fotos = page.locator('.images-grid').first().locator('.img-preview');
+  for (let i = 0; i < 40 && await fotos.count() === 0; i++) await espera(500);
+  if (await fotos.count() === 0) throw new Error('a grade de fotos do imóvel não carregou no Jetimob');
 }
 
 // As caixas da grade têm como id a URL da foto (ou blob: enquanto a nova não subiu).
@@ -139,7 +143,8 @@ async function publicarUm(page, codigo, arquivo, urlAnterior = null) {
   await page.locator('a.jet-button.next.primary:has-text("Salvar")').first().click();
   if (resposta) {
     const r = await resposta.catch(() => null);
-    if (!conferido?.ok) throw new Error(`JSON do Salvar não bateu (${conferido?.total} fotos, esperava ${antes.length + 1}); envio cancelado`);
+    if (!conferido) throw new Error(`o Salvar não enviou nada ao Jetimob (a tela tinha ${antes.length} fotos)`);
+    if (!conferido.ok) throw new Error(`JSON do Salvar não bateu (${conferido.total} fotos, esperava ${antes.length + 1}); envio cancelado`);
     if (!r || !r.ok()) throw new Error(`Jetimob recusou o Salvar: HTTP ${r ? r.status() : 'sem resposta'}`);
   } else {
     for (let i = 0; i < 20 && !conferido; i++) await espera(500);
@@ -284,7 +289,7 @@ function pegarTrava() {
             ok++;
           } catch (e) {
             console.log(`✗ ${codigo} ERRO: ${e.message.split('\n')[0]}`);
-            await page.screenshot({ path: path.join(SAIDA, `${codigo}_erro-jetimob.png`) }).catch(() => {});
+            await guardarPrint(page, `jetimob-${codigo}`);
             falhas.push(codigo);
           }
           if (i < fila.length - 1) await espera(PAUSA * 1000);

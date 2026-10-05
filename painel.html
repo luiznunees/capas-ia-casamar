@@ -375,6 +375,14 @@
   <section class="aba" id="aba-logs">
     <h2 class="titulo">Últimas rodadas</h2>
     <div class="cartao" id="rodadas"></div>
+    <div class="so-admin">
+      <h2 class="titulo">Prints de erros</h2>
+      <div class="cartao">
+        <p class="suave pequeno" style="margin:0 0 10px">A tela do ChatGPT (ia-…) ou do Jetimob (jetimob-…) no momento de cada erro, mais recentes primeiro.</p>
+        <div class="recentes" id="prints"></div>
+      </div>
+    </div>
+
     <h2 class="titulo">Log completo de hoje</h2>
     <div class="cartao">
       <div class="linha-acoes" style="margin-top:0">
@@ -419,7 +427,7 @@ function rota() {
   if (nome === 'imovel') { carregarRecentes(); if (arg && arg !== atual?.codigo) { $('#codigo').value = arg; buscar(arg); } }
   if (nome === 'controles') carregarControles();
   if (nome === 'alertas') carregarAlertas();
-  if (nome === 'logs') { carregarRodadas(); atualizarAba = setInterval(carregarRodadas, 30000); }
+  if (nome === 'logs') { carregarRodadas(); if (papel !== 'leitura') carregarPrints(); atualizarAba = setInterval(carregarRodadas, 30000); }
 }
 // links antigos: #16504
 if (/^#\d+$/.test(location.hash)) location.hash = `#/imovel/${location.hash.slice(1)}`;
@@ -716,6 +724,17 @@ document.querySelectorAll('[data-log]').forEach(b => b.onclick = async () => {
     pre.scrollTop = pre.scrollHeight;
   } catch (e) { pre.textContent = e.message; }
 });
+
+async function carregarPrints() {
+  try {
+    const l = await api('/api/debug');
+    $('#prints').innerHTML = l.length ? l.map(p => `
+      <a href="/img/debug/${esc(p.arquivo)}" target="_blank" rel="noopener" style="text-decoration:none;color:inherit">
+        <button style="width:100%"><img src="/img/debug/${esc(p.arquivo)}" alt="" loading="lazy" style="aspect-ratio:16/10;object-fit:cover">
+        <span>${esc(p.arquivo.replace(/\.png$/, ''))}<br><span class="suave">${quando(p.data)}</span></span></button></a>`).join('')
+      : '<span class="suave">Nenhum print de erro.</span>';
+  } catch (e) { $('#prints').textContent = e.message; }
+}
 
 // ================= ACESSOS (só admin) =================
 async function carregarAcessos() {

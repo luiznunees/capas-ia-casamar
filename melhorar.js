@@ -45,7 +45,7 @@ const fs = require('fs');
 const path = require('path');
 const sharp = require('sharp');
 const { chromium } = require('playwright');
-const { ENTRADA, SAIDA, argsChrome, lerConfig, condominiosDoSite, resolver, alvosOuEntrada, imoveisDoSite, imoveisDoCondominio } = require('./fotos');
+const { ENTRADA, SAIDA, guardarPrint, argsChrome, lerConfig, condominiosDoSite, resolver, alvosOuEntrada, imoveisDoSite, imoveisDoCondominio } = require('./fotos');
 
 // ---------- argumentos ----------
 const args = process.argv.slice(2);
@@ -238,6 +238,31 @@ async function limparChatsAntigos(page) {
 }
 
 // ---------- uma imagem ----------
+// Avisos do ChatGPT que aparecem por cima da caixa de mensagem (novidades, pesquisa, cookies...)
+// e impedem o clique: Esc e os botões de dispensar mais comuns.
+async function fecharAvisos(page) {
+  await page.keyboard.press('Escape').catch(() => {});
+  const dispensar = page.getByRole('button', {
+    name: /^(ok|entendi|ok, entendi|fechar|close|dismiss|agora não|not now|maybe later|talvez mais tarde|got it|aceitar|accept all|aceitar todos|rejeitar não essenciais|reject non-essential|pular|skip)$/i,
+  });
+  for (let i = 0; i < 3; i++) {
+    const b = dispensar.first();
+    if (!(await b.isVisible().catch(() => false))) break;
+    await b.click({ timeout: 3000 }).catch(() => {});
+    await espera(500);
+  }
+  await page.keyboard.press('Escape').catch(() => {});
+}
+
+// Clica na caixa de mensagem; se algo estiver por cima, fecha os avisos e tenta de novo,
+// e no fim só dá foco (o texto entra pelo teclado, não precisa do clique).
+async function focarCaixa(page, caixa) {
+  if (await caixa.click({ timeout: 8000 }).then(() => true, () => false)) return;
+  await fecharAvisos(page);
+  if (await caixa.click({ timeout: 8000 }).then(() => true, () => false)) return;
+  await caixa.focus();
+}
+
 async function editarNoChatGPT(page, arqFoto) {
   await page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded' });
   const caixa = page.locator(SELETOR_CAIXA).first();
@@ -247,7 +272,7 @@ async function editarNoChatGPT(page, arqFoto) {
   await page.locator('input[type="file"]').first().setInputFiles(arqFoto);
   await espera(3000);
 
-  await caixa.click();
+  await focarCaixa(page, caixa);
   await page.keyboard.insertText(PROMPT);
   await espera(800);
 
@@ -255,10 +280,10 @@ async function editarNoChatGPT(page, arqFoto) {
   const enviar = page.locator(SELETOR_ENVIAR).first();
   if (await enviar.waitFor({ timeout: 20000 }).then(() => true, () => false)) {
     for (let i = 0; i < 60 && await enviar.isDisabled(); i++) await espera(1000);
-    await enviar.click();
+    await enviar.click({ timeout: 10000 }).catch(async () => { await fecharAvisos(page); await enviar.click({ force: true }); });
   } else {
     // sem botão reconhecível: Enter envia a mensagem no editor do ChatGPT
-    await caixa.click();
+    await focarCaixa(page, caixa);
     await page.keyboard.press('Enter');
   }
 
@@ -584,7 +609,8 @@ function pegarUrgente() {
         ok++;
         console.log(`✓ [${n}] ${nome} ok (${Math.round((Date.now() - t0) / 1000)}s) -> ${m.width}x${m.height}`);
       } catch (e) {
-        console.log(`✗ ${nome} ERRO: ${e.message}`);
+        console.log(`✗ ${nome} ERRO: ${e.message.split('\n')[0]}`);
+        await guardarPrint(aba, `ia-${nome}`);
         falhas.push(nome);
         if (e.limite && !parar) { parar = true; console.log('\nLimite do ChatGPT atingido. Rode de novo mais tarde que ele continua de onde parou.'); }
         // sessão caiu no meio da rodada: não adianta seguir (confere com calma antes: um erro
